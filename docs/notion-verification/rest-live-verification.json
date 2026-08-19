@@ -1,0 +1,13 @@
+{
+  "source": "notion_rest",
+  "status": "succeeded",
+  "parent_page_url": "https://app.notion.com/p/ebe0ffe9306d82329a928189e78f66d2",
+  "proposal_id": "44444444-4444-4444-8444-444444444444",
+  "created_page_id": "3c10ffe9-306d-815a-9b21-ec7c6903376b",
+  "created_page_url": "https://app.notion.com/p/progress-44444444-4444-4444-8444-444444444444-3c10ffe9306d815a9b21ec7c6903376b",
+  "verified_visible_content": [
+    "Public OAuth: ok",
+    "Background worker: ok"
+  ],
+  "credentials_persisted": false
+}
