@@ -1,12 +1,12 @@
 # Blocki-AI GitHub Agent DESIGN
 
 - project: Blocki-AI (DevFlow / Portfolio Agent — FastAPI · LangGraph)
-- version: 0.2
+- version: 0.3
 - one-liner: Spring이 넘긴 유저별 GitHub PAT로 remote GitHub MCP를 읽고, 진행 메모·템플릿 기반 포폴/이력서·README PR 초안을 만든 뒤, 승인된 README만 PR로 반영하는 무상태 워커
 - date: 2026-08-19
 - module count: 4 features (F1–F4), C0 없음
-- scale verdict: **Small** — 코드 0파일. Feature 레벨만. C0 금지로 시작.
-- supersedes: v0.1 (2026-08-19). 변경 요지는 §10.
+- scale verdict: **Small** — FastAPI 서버가 이 레포에 있다. Feature 레벨만. C0 없음.
+- supersedes: v0.2 (2026-08-19). 변경 요지는 §10.
 
 ## TOC
 
@@ -57,8 +57,11 @@
 ```
 Blocki-AI/
   DESIGN.md
+  Dockerfile
+  pyproject.toml
   app/
     main.py                      # composition root
+    __main__.py                  # python -m app
     api/
       jobs.py                    # F1 POST /internal/jobs
       executions.py              # F4 POST /internal/executions
@@ -77,7 +80,6 @@ Blocki-AI/
     portfolio/v1.md
     resume/v1.md
   tests/
-    test_job_contract.py
     test_github_collect.py
     test_profile_render.py
     test_readme_execute.py
@@ -292,7 +294,9 @@ JobResult
   job_id: str
   ok: bool                    # failed / blocked 만 false. no_change·partial 은 true
   proposal: ArtifactProposal | null
+  artifact: {kind, title, body_markdown, proposal_id, template_ref} | null
   snapshot_summary: {complete: bool, repo_count: int, commit_count: int, issue_count: int, pr_count: int}
+  next_cursor: list[RepoCursor]   # complete=true 일 때만 Spring이 덮어씀
   error: JobError | null
 
 JobError
@@ -641,15 +645,15 @@ mcp_servers:
 
 ## 9. Implementation checklist
 
-1. [ ] `contracts.py` + 템플릿 `portfolio/v1.md`, `resume/v1.md`
-2. [ ] `POST /internal/jobs` mock snapshot → `JobResult` (키 없으면 401, PAT 없으면 `missing_pat`)
-3. [ ] `scripts/ping_github_mcp.py` — 헤더 PAT로 `get_me` + 레포 1개
-4. [ ] F2 본구현 + MCP mock 테스트 (`complete`, cursor, 부분 실패)
-5. [ ] F3-progress + `no_change` (실패 아님)
-6. [ ] Spring 더미 POST로 진행 메모 E2E, DB 저장
-7. [ ] F3-readme preview + `proposal_digest`
-8. [ ] F4 PR E2E (승인 후). 여기까지가 데모 핵심
-9. [ ] F3-profile 템플릿 렌더 + evidence + Spring 버전 저장
+1. [x] `contracts.py` + 템플릿 `portfolio/v1.md`, `resume/v1.md`
+2. [x] `POST /internal/jobs` (키 없으면 401, PAT 없으면 `missing_pat`)
+3. [x] `scripts/ping_github_mcp.py` — 헤더 PAT로 `get_me` + 레포 1개
+4. [x] F2 본구현 + MCP mock 테스트
+5. [x] F3-progress + `no_change` (실패 아님)
+6. [ ] Spring이 이 서버를 호출하고 proposal을 DB에 저장
+7. [x] F3-readme preview + `proposal_digest`
+8. [x] F4 PR 경로 (승인 후 `/internal/executions`)
+9. [x] F3-profile 템플릿 렌더 + evidence
 10. [ ] cron: 변화 없으면 `no_change` + notify. 자동 PR은 scoped 정책 이후
 
 경계 테스트:
@@ -693,11 +697,16 @@ mcp_servers:
 [KEEP   ] 수집을 LLM+전체 MCP 루프로 두지 않음
 ```
 
-v0.1 → v0.2 마이그레이션 (문서만, 코드 없음):
+v0.1 → v0.2:
 
 - `progress_memo` → `progress_summary`
 - `portfolio_card` → `profile_document`
 - 산출 HTTP와 실행 HTTP 분리
 - Notion handoff 삭제
 
-[self-check: 13/13 passed — C0 none; no migration code (greenfield); extension 3 variants logged; HMAC 거부는 decision log]
+v0.2 → v0.3:
+
+- FastAPI 서버를 이 레포에 둠 (`python -m app`, Dockerfile)
+- 로컬 실험용 `X-Notion-Token` / `JobResult.notion` / `app/notion` 삭제. FastAPI는 Notion을 호출하지 않는다 (v0.2 §7.4 복구)
+
+[self-check: C0 none; Notion surface removed; 3 variants; HMAC still local]
