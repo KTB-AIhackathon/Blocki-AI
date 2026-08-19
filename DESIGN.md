@@ -1,11 +1,12 @@
 # Blocki-AI GitHub Agent DESIGN
 
 - project: Blocki-AI (DevFlow / Portfolio Agent — FastAPI · LangGraph)
-- version: 0.1
-- one-liner: Spring이 넘긴 유저별 GitHub PAT로 remote GitHub MCP를 호출하고, 진행 메모·포트폴리오·README 개선 산출물을 돌려주는 무상태 에이전트 워커
+- version: 0.2
+- one-liner: Spring이 넘긴 유저별 GitHub PAT로 remote GitHub MCP를 읽고, 진행 메모·템플릿 기반 포폴/이력서·README PR 초안을 만든 뒤, 승인된 README만 PR로 반영하는 무상태 워커
 - date: 2026-08-19
-- module count: 3 features (F1–F3), C0 없음
-- scale verdict: **Small** — 현재 코드 0파일. Feature 레벨만. C0 금지로 시작.
+- module count: 4 features (F1–F4), C0 없음
+- scale verdict: **Small** — 코드 0파일. Feature 레벨만. C0 금지로 시작.
+- supersedes: v0.1 (2026-08-19). 변경 요지는 §10.
 
 ## TOC
 
@@ -24,24 +25,30 @@
 
 ## 1. Tech-stack table
 
-명세와 담당 분담이 이미 잠겨 있어 이 표를 기본값으로 확정한다. (Phase 1 승인 게이트 — 이미 답한 항목은 재질문하지 않음)
+이미 잠긴 값. 재질문하지 않음.
 
 | 영역 | 기술 | 이유 |
 | --- | --- | --- |
-| 에이전트 HTTP | FastAPI | 담당 스택. Spring이 부르는 내부 API만 둔다. |
-| 워크플로 | LangGraph | 다단계 수집→요약→산출. 그래프별로 도구 집합을 다르게 준다. |
-| GitHub 도구 | Remote GitHub MCP `https://api.githubcopilot.com/mcp/` | 사용자가 지정한 엔드포인트. PAT를 `Authorization: Bearer`로 넘기는 공식 경로. 로컬 Docker MCP는 쓰지 않는다. |
-| MCP 클라이언트 | `langchain-mcp-adapters` `MultiServerMCPClient` | LangGraph 도구로 바로 붙는다. `transport: "http"`, job마다 headers를 새로 넣는다. |
-| LLM | 환경변수로 모델만 교체 (OpenAI 호환 또는 팀 합의 모델) | 그래프와 분리. 키는 composition root에서만 읽는다. |
-| 유저·토큰·스케줄 원본 | Spring Boot | FastAPI는 PAT를 저장하지 않는다. |
-| Notion MCP | `https://mcp.notion.com/mcp` (팀원) | 이 레포는 Notion을 구현하지 않는다. F1이 draft를 넘기거나 훅만 연다. |
-| 배포 | Docker on EC2 | 명세 비기능. FastAPI 단일 프로세스부터. |
+| 에이전트 HTTP | FastAPI | 담당 스택. Spring만 부르는 내부 API. |
+| 제안 파이프라인 | LangGraph 2노드 (`collect` → `build`) | 수집과 산출만 나눈다. LLM 오케스트레이터는 없다. |
+| 실행 파이프라인 | 일반 async 함수 (F4) | 쓰기 경로에 LLM이 없다. |
+| GitHub 도구 | Remote MCP `https://api.githubcopilot.com/mcp/` | 유저 PAT를 헤더로 넣는 공식 경로. |
+| MCP 클라이언트 | `langchain-mcp-adapters` `MultiServerMCPClient` | job마다 새 클라이언트. 전역 재사용 금지. |
+| LLM | env로 모델만 교체 | F3에서만 사용. F2/F4에 도구로 넘기지 않음. |
+| 유저·토큰·버전 원본 | Spring Boot | FastAPI는 PAT·산출 이력을 저장하지 않음. |
+| 포폴/이력서 | `templates/*.md` allowlist 치환 | 팀 합의. 카드 JSON이 아니라 문서. |
+| Notion | 후순위, 이 레포 밖 | 과거 버전 로그는 Spring DB 미러 후 Notion. |
+| 캘린더 | 제외 | 팀 합의. |
+| 배포 | Docker on EC2 | 명세. |
 
 선택하지 않은 것:
 
-- FastAPI에 GitHub OAuth/토큰 DB를 두지 않음. 인증이 두 백엔드로 갈라진다.
-- 로컬 `ghcr.io/github/github-mcp-server` 를 기본으로 두지 않음. remote가 막히면 그때만 fallback.
-- 유저 JWT를 FastAPI가 직접 검증하는 구조를 기본으로 두지 않음. Spring→FastAPI는 내부 서비스 키.
+- 6개 서브에이전트 / LLM Orchestrator
+- FastAPI 토큰 DB, FastAPI 스케줄러, FastAPI 공개 웹훅
+- 로컬 `github-mcp-server` Docker (remote가 막힐 때만)
+- Job body의 `notion` 필드 (v0.1 제거)
+- PAT를 JSON body / LangGraph state에 넣는 것
+- 서명된 `approval_grant` HMAC (내부망 + digest로 충분. FastAPI가 외부에 열리면 추가)
 
 ---
 
@@ -51,51 +58,83 @@
 Blocki-AI/
   DESIGN.md
   app/
-    main.py                 # composition root — env, 라우터, 그래프 선택 맵
+    main.py                      # composition root
     api/
-      jobs.py               # F1 public HTTP
-    agents/
-      github_collect.py     # F2
-      artifacts/
-        __init__.py         # ArtifactBuilder 타입 + 선택 맵이 쓰는 이름만 export
-        progress.py         # F3-progress
-        portfolio.py        # F3-portfolio
-        readme.py           # F3-readme
-    contracts.py            # JobRequest / JobResult / GitHubSnapshot 타입 (root가 import)
+      jobs.py                    # F1 POST /internal/jobs
+      executions.py              # F4 POST /internal/executions
+    collect/
+      github.py                  # F2
+    artifacts/
+      __init__.py                # build_artifact + 타입
+      progress.py                # F3-progress
+      profile.py                 # F3-profile (portfolio|resume)
+      readme.py                  # F3-readme
+    execute/
+      readme_pr.py               # F4
+    contracts.py
+    templates_render.py          # allowlist 치환 함수. 모듈 아님
+  templates/
+    portfolio/v1.md
+    resume/v1.md
   tests/
     test_job_contract.py
     test_github_collect.py
-    test_progress_artifact.py
+    test_profile_render.py
+    test_readme_execute.py
 ```
 
-`app/main.py` 가 유일한 composition root. 에이전트 모듈은 서로를 import하지 않는다.
+`app/main.py` 만 피처를 조립한다. 피처끼리 import 금지.
 
 ---
 
 ## 3. Main pipeline
 
+제안 (읽기):
+
 ```mermaid
 graph LR
-  Spring -->|JobRequest| F1
-  F1 -->|GitHubCollectRequest| F2
+  Spring -->|JobRequest + PAT header| F1
+  F1 -->|CollectRequest| F2
   F2 -->|GitHubSnapshot| F3
-  F3 -->|Artifact| F1
+  F3 -->|ArtifactProposal| F1
   F1 -->|JobResult| Spring
 ```
 
-조건 분기는 F1 안에만 있다. 메인 라인은 항상 `F1 → F2 → F3 → F1`.
+실행 (쓰기, 승인 후):
 
-### OUT→IN chain
+```mermaid
+graph LR
+  Spring -->|ExecuteRequest + PAT header| F4
+  F4 -->|ExecuteResult| Spring
+  F4 -->|create PR| GitHubMCP
+```
+
+조건 분기는 F1 안에만 있다. 제안 라인은 항상 `F1 → F2 → F3 → F1`.
+
+### OUT→IN chain (제안)
 
 | 단계 | OUT | 다음 IN |
 | --- | --- | --- |
-| Spring | `JobRequest` | F1.main |
-| F1 | `GitHubCollectRequest` | F2.main |
-| F2 | `GitHubSnapshot` | F3.main |
-| F3 | `Artifact` | F1 (pack) |
+| Spring | `JobRequest` + `X-GitHub-Pat` | F1 |
+| F1 | `CollectRequest` (PAT는 aux, state 밖) | F2 |
+| F2 | `GitHubSnapshot` | F3 |
+| F3 | `ArtifactProposal` | F1 pack |
 | F1 | `JobResult` | Spring |
 
-파이프라인 기본 실패 정책: MCP 일시 오류는 `retry(2)`, PAT 없음/401은 `halt`, 활동 0건은 `skip-and-log` 후 빈 스냅샷으로 F3 진행.
+### OUT→IN chain (실행)
+
+| 단계 | OUT | 다음 IN |
+| --- | --- | --- |
+| Spring | `ExecuteRequest` + `X-GitHub-Pat` | F4 |
+| F4 | `ExecuteResult` | Spring |
+
+파이프라인 실패 정책:
+
+- MCP 일시 오류 `retry(2)` 후 `mcp_unavailable` / `github_rate_limit`
+- PAT 없음·401 `halt` (`missing_pat` / `github_auth`)
+- 부분 수집 성공 `complete=false`, `status=partial`
+- 변화 없음 `status=no_change` (실패가 아님). Spring은 이 경우 cursor를 유지하거나 `next_cursor`만 갱신
+- `complete=false` 이면 Spring은 cursor를 갱신하지 않음
 
 ---
 
@@ -105,28 +144,29 @@ none.
 
 거부 기록:
 
-- GitHub MCP 클라이언트 팩토리 — 사용 예정 지점이 F1 한 곳(루트가 F2에 tools를 넘김). rule of three 실패. F1 함수로 둔다.
-- HTTP/JSON 파서, env 로더 — module floor 미달.
-- Notion 클라이언트 — 이 레포 사용 지점 0. 팀원 영역.
-- 공통 “AgentBase” / 레지스트리 프레임워크 — 구현체 3개가 아직 코드로 없다. Extension gate는 타입+선택 맵만 허용하고 프레임워크는 거부.
+- MCP 팩토리 — F1이 F2/F4에 클라이언트를 넘기지 않고, 각 피처가 자기 요청의 PAT로 만든다. 사용처 2 (F2, F4). rule of three 실패.
+- 템플릿 렌더러 — 사용처 2 (portfolio, resume). 함수 `templates_render.py`.
+- env 로더, JSON 파서 — module floor 미달.
+- Notion 클라이언트 — 이 레포 사용처 0.
+- AgentBase / 레지스트리 / DI — 구현체 코드 없음.
 
 ---
 
 ## 5. Extension points
 
-계약: `build_artifact(snapshot: GitHubSnapshot, job: JobRequest) -> Artifact`
+계약: `build_artifact(snapshot: GitHubSnapshot, job: JobRequest) -> ArtifactProposal`
 
-현재 variant (MVP 요구에 이미 3개):
-
-| job_type | 모듈 | 도구 정책 |
+| job_type | 모듈 | MCP |
 | --- | --- | --- |
-| `progress_memo` | `agents/artifacts/progress.py` | GitHub read-only |
-| `portfolio_card` | `agents/artifacts/portfolio.py` | GitHub read-only |
-| `readme_improve` | `agents/artifacts/readme.py` | repos 읽기 + PR 쓰기 (마지막에 연다) |
+| `progress_summary` | `artifacts/progress.py` | 없음 |
+| `profile_document` | `artifacts/profile.py` | 없음 |
+| `readme_proposal` | `artifacts/readme.py` | 없음 |
 
-선택 맵 위치: `app/main.py` 의 `ARTIFACT_BUILDERS: dict[JobType, BuildFn]`.
+선택 맵: `app/main.py` 의 `ARTIFACT_BUILDERS`.
 
-variant 추가: `agents/artifacts/<name>.py` 하나 + `main.py` 맵에 한 줄.
+variant 추가: 파일 하나 + 맵 한 줄.
+
+`portfolio` / `resume` 는 별 variant가 아니다. `document.kind` 로 같은 렌더러가 템플릿만 고른다.
 
 ---
 
@@ -134,129 +174,232 @@ variant 추가: `agents/artifacts/<name>.py` 하나 + `main.py` 맵에 한 줄.
 
 ### 공유 타입 (`contracts.py`)
 
-루트와 피처가 같이 쓰는 타입만 둔다. 피처가 아니다.
-
 ```
-JobType = "progress_memo" | "portfolio_card" | "readme_improve"
-
-JobRequest
-  job_id: str
-  user_id: str
-  job_type: JobType
-  github_pat: str
-  repos: list[RepoRef]          # 비면 F2가 유저 접근 가능 레포를 최대 N개
-  since: datetime | null        # 기본: 24h
-  notion: NotionHint | null     # opaque. 이 레포는 해석하지 않음
-  extra: dict
+JobType = "progress_summary" | "profile_document" | "readme_proposal"
 
 RepoRef
   owner: str
   name: str
 
-GitHubCollectRequest
+RepoCursor
+  owner: str
+  name: str
+  head_sha: str
+  last_success_at: datetime
+
+DocumentSpec
+  kind: "portfolio" | "resume"   # 템플릿 경로도 이 값으로 고른다
+  template_version: str          # 예: "v1" → templates/{kind}/v1.md
+  profile_fields: ProfileFields
+
+ProfileFields                 # Spring이 유저에게 받은 값. 추측 금지
+  name: str
+  contact_md: str
+  experience_md: str          # resume만 필수, portfolio는 빈 문자열 허용
+  education_md: str           # resume만 필수
+
+JobRequest
+  job_id: str                 # uuid
+  user_id: str                # uuid
+  job_type: JobType
+  repos: list[RepoRef]        # 비면 F2가 접근 가능 레포 최대 5개
+  since: datetime | null      # cursor가 있으면 cursor 우선
+  cursor: list[RepoCursor] | null
+  document: DocumentSpec | null   # profile_document 필수
+  readme: ReadmeTarget | null     # readme_proposal 필수
+
+ReadmeTarget
+  owner: str
+  repo: str
+  path: str                   # allowlist만. 기본 "README.md"
+
+CollectRequest
   job_id: str
-  github_pat: str
   repos: list[RepoRef]
-  since: datetime
-  toolsets: list[str]
-  readonly: bool
+  since: datetime | null
+  cursor: list[RepoCursor] | null
+  needs: set["activity" | "profile_evidence" | "readme"]
+  # github_pat 는 타입에 넣지 않는다. 함수 인자 aux.
 
 GitHubSnapshot
   collected_at: datetime
+  complete: bool
+  snapshot_digest: str        # 안정 해시. 승인 바인딩용
   viewer_login: str | null
   repos: list[RepoActivity]
+  next_cursor: list[RepoCursor]
   warnings: list[str]
 
 RepoActivity
   owner: str
   name: str
   default_branch: str | null
-  commits: list[CommitSummary]   # sha, message, author, committed_at
-  issues: list[IssueSummary]     # number, title, state, updated_at
-  pull_requests: list[PrSummary] # number, title, state, updated_at
-  readme: FileBlob | null        # path, content — readme job만 채움. 그 외 null
+  head_sha: str | null
+  description: str | null
+  topics: list[str]
+  languages: list[{name: str, bytes: int}]
+  manifest_files: list[str]   # 예: package.json, pyproject.toml 존재만
+  commits: list[CommitSummary]
+  issues: list[IssueSummary]
+  pull_requests: list[PrSummary]
+  readme: ReadmeBlob | null
 
-Artifact
-  job_type: JobType
+CommitSummary
+  sha: str
+  message: str
+  author: str | null
+  committed_at: datetime | null
+
+IssueSummary / PrSummary
+  number: int
   title: str
+  state: str
+  updated_at: datetime | null
+
+ReadmeBlob
+  path: str
+  blob_sha: str
+  content: str
+
+ArtifactProposal
+  proposal_id: str
+  job_id: str
+  status: "proposed" | "no_change" | "partial" | "blocked" | "failed"
+  kind: "progress" | "portfolio" | "resume" | "readme"
   body_markdown: str
-  structured: dict               # 포폴 카드 필드, PR 초안 등
-  proposed_actions: list[Action] # 예: create_pr (실행 전 상태일 수 있음)
+  template_ref: {kind: "portfolio" | "resume", version: str, sha256: str} | null
+  evidence_refs: list[{field: str, repo: str, source_type: str, source_id: str}]
+  unresolved_fields: list[str]
+  proposed_action: ReadmePrAction | null
+  proposal_digest: str        # 아래 해시 규칙. 필드 자신을 해시에 넣지 않음
+  action_digest: str | null   # proposed_action 이 있을 때만. hash(action)
+  warnings: list[str]
+  error: JobError | null
+
+ReadmePrAction
+  type: "create_readme_pr"
+  owner: str
+  repo: str
+  path: str
+  base_branch: str
+  expected_base_sha: str
+  expected_blob_sha: str
+  replacement_markdown: str
+  pr_title: str
+  pr_body: str
 
 JobResult
   job_id: str
-  ok: bool
-  artifact: Artifact | null
-  snapshot_summary: dict         # 커밋/이슈/PR 건수
+  ok: bool                    # failed / blocked 만 false. no_change·partial 은 true
+  proposal: ArtifactProposal | null
+  snapshot_summary: {complete: bool, repo_count: int, commit_count: int, issue_count: int, pr_count: int}
   error: JobError | null
-  notion_handoff: NotionHint | null
 
 JobError
-  code: "missing_pat" | "github_auth" | "github_rate_limit" | "mcp_unavailable" | "llm_failed" | "empty" | "internal"
+  code: "missing_pat" | "github_auth" | "github_rate_limit" | "mcp_unavailable"
+      | "llm_failed" | "blocked" | "stale_sha" | "duplicate" | "internal" | "validation"
   message: str
   retryable: bool
+
+ExecuteRequest
+  execution_id: str
+  proposal_id: str
+  action_digest: str          # Spring이 제안 당시 저장한 값. F4는 hash(action)과 비교
+  action: ReadmePrAction
+  idempotency_key: str        # 반드시 proposal_id 와 동일. 아니면 validation
+
+ExecuteResult
+  execution_id: str
+  status: "created" | "duplicate" | "rejected"
+  pr_url: str | null
+  error: JobError | null
 ```
+
+`structured: dict`, `extra: dict`, `notion` 필드는 없다.
+
+### 해시 규칙 (blocker 수정)
+
+두 해시를 섞지 않는다. 둘 다 **자기 자신 필드를 제외한** canonical JSON의 SHA-256 hex.
+
+```
+proposal_digest = sha256(canonical({
+  job_id, kind, body_markdown, template_ref,
+  evidence_refs, unresolved_fields, proposed_action,
+  snapshot_digest  # GitHubSnapshot.snapshot_digest
+}))
+
+action_digest = sha256(canonical(ReadmePrAction))
+```
+
+- F1/F3가 둘 다 채워 반환한다. `proposed_action`이 없으면 `action_digest=null`.
+- F4는 `sha256(canonical(req.action)) == req.action_digest` 만 검사한다. `proposal_digest`를 쓰지 않는다.
+- Spring은 승인 시 제안 행에 저장된 `action_digest`와 `action_json`을 그대로 보낸다. 클라이언트가 action을 고쳐 보내면 거절된다.
+
+canonical JSON: UTF-8, 키 정렬, 공백 없음, datetime은 ISO-8601 UTC.
+
+### README 경로 allowlist
+
+`ReadmeTarget.path` / `ReadmePrAction.path` 는 다음만 허용한다. 그 외는 F1·F4 `validation`.
+
+- `..` 없음, 절대경로 없음, `\` 없음
+- 정규식: `^(docs/)?README(\.(md|markdown|rst|txt))?$` (대소문자 무시)
+- 기본값: `README.md`
 
 ---
 
 ### F1 JobIngress
 
-PUBLIC: `handle_job(req: JobRequest) -> JobResult`, `JobRequest`, `JobResult`
+PUBLIC: `handle_job(req: JobRequest, github_pat: str) -> JobResult`
 
-IN (main):
-
-- `req: JobRequest` ← Spring HTTP body
+IN (main): `req: JobRequest` ← Spring JSON
 
 IN (aux):
 
-- `internal_key: str` ← `main.py` 가 env `INTERNAL_API_KEY` 를 읽어 헤더 검증에 사용
-- `artifact_builders: dict[JobType, BuildFn]` ← `main.py` 선택 맵
-- `collect_fn: CollectFn` ← F2 `collect_github`
-- `llm` ← root가 구성한 모델 클라이언트 (F3에 전달)
+- `github_pat: str` ← 헤더 `X-GitHub-Pat`. Pydantic 모델·그래프 state·로그·응답에 넣지 않음
+- `internal_key: str` ← `X-Internal-Key`, `main.py` 가 env에서 읽음
+- `builders` ← root 선택 맵
+- `collect_fn` ← F2
+- `llm` ← root, F3에만 전달
 
-OUT: `JobResult` (필드 위 공유 타입)
+OUT: `JobResult`
 
-FAIL: `JobError`. 인증 헤더 실패는 HTTP 401이고 그래프에 들어가지 않음.
+FAIL: 헤더 키 실패는 HTTP 401 (그래프 진입 전). PAT 공백은 `missing_pat`.
 
 내부 로직:
 
 1. `X-Internal-Key` 검증
-2. `github_pat` 공백이면 `halt` / `missing_pat`
-3. `GitHubCollectRequest` 구성. toolsets는 job_type으로 고정:
-   - `progress_memo`, `portfolio_card`: `context,repos,issues,pull_requests` + `X-MCP-Readonly: true`
-   - `readme_improve`: `context,repos,pull_requests` (쓰기 허용은 F3-readme가 PR을 낼 때만)
-4. F2 호출 → F3 선택 맵 호출 → `JobResult` 포장
-5. `req.notion` 이 있으면 `notion_handoff`에 그대로 실어 Spring/노션 파트에 넘긴다. Notion MCP 호출은 하지 않는다.
+2. `job_type`별 필수 필드 검증 (`document` / `readme`)
+3. `needs` 결정: progress→activity, profile→profile_evidence+activity, readme→readme
+4. F2 호출 (PAT는 인자로만)
+5. F3 선택 맵 호출
+6. `proposal_digest` / `action_digest` 를 위 해시 규칙으로 채움. `proposal_digest` 필드 자신을 해시에 넣지 않음
 
 constraints:
 
-- PAT를 로그/트레이스에 남기지 않는다.
-- FastAPI는 유저 테이블을 갖지 않는다.
-- 동기 HTTP 한 요청 = 한 잡. 타임아웃 기본 60s. 길면 Spring이 나중에 비동기 콜백을 붙인다 (지금은 없음).
+- LLM 라우팅 없음. `job_type` 고정 맵.
+- 채팅 문장 분류가 필요하면 Spring이 `job_type`으로 바꿔 보낸다.
+- 동기 한 요청 = 한 잡. 타임아웃 60s.
 
-parallel-safe: no (요청 단위 직렬. 워커 여러 개면 프로세스 여러 개)
+parallel-safe: no (요청 단위)
 
-REMOVE: `app/api/jobs.py` 삭제 + `main.py` 라우터 한 줄 제거. Spring 호출이 죽는다.
+REMOVE: `api/jobs.py` 삭제 + `main.py` 라우터 제거.
 
 ---
 
 ### F2 GitHubCollect
 
-PUBLIC: `collect_github(req: GitHubCollectRequest) -> GitHubSnapshot`
+PUBLIC: `collect_github(req: CollectRequest, github_pat: str) -> GitHubSnapshot`
 
-IN (main):
-
-- `req: GitHubCollectRequest` ← F1
-
-IN (aux): 없음. PAT·URL은 req 안.
+IN (main): `req: CollectRequest` ← F1  
+IN (aux): `github_pat: str` ← F1, state 밖
 
 OUT: `GitHubSnapshot`
 
-FAIL: `JobError(code=github_auth|github_rate_limit|mcp_unavailable)` — F1이 JobResult로 변환. 부분 실패(레포 1개 401)는 그 레포를 건너뛰고 `warnings`에 넣는다.
+FAIL: 전면 401/429/연결 실패는 예외 → F1이 `JobError`로 변환. 레포 1개 실패는 건너뛰고 `warnings` + `complete=false`.
 
 내부 로직:
 
-1. job마다 `MultiServerMCPClient` 생성. 프로세스 전역 클라이언트를 유저 PAT로 재사용하지 않는다.
+1. job마다 MCP 클라이언트 생성.
 
 ```python
 client = MultiServerMCPClient({
@@ -264,143 +407,183 @@ client = MultiServerMCPClient({
         "transport": "http",
         "url": "https://api.githubcopilot.com/mcp/",
         "headers": {
-            "Authorization": f"Bearer {req.github_pat}",
-            "X-MCP-Toolsets": ",".join(req.toolsets),
-            "X-MCP-Readonly": "true" if req.readonly else "false",
+            "Authorization": f"Bearer {github_pat}",
+            "X-MCP-Toolsets": "context,repos,issues,pull_requests",
+            "X-MCP-Readonly": "true",
         },
     }
 })
-tools = await client.get_tools()
 ```
 
-2. 고정 순서로만 도구를 부른다 (자유 루프 금지 — 해커톤에서 비용·폭주 방지):
-   1. `get_me` → `viewer_login`
-   2. `repos` 비면 접근 가능 레포 목록에서 **최대 5개**
-   3. 레포마다 since 이후 커밋 / 이슈 / PR
-   4. `readme_improve` 일 때만 README 파일 내용
-3. LLM에게 MCP tool 전체를 열지 않는다. 수집은 코드가 도구를 고른다.
+2. 코드가 도구를 고정 호출. LLM에게 MCP를 열지 않음.
+   1. `get_me`
+   2. `repos` 비면 목록에서 최대 5개
+   3. 레포 메타: default_branch, head_sha, description, topics, languages, manifest 존재
+   4. `needs`에 activity면 since/cursor 이후 커밋·이슈·PR (커밋 30, 이슈 20, PR 20)
+   5. `needs`에 readme면 해당 파일 content + blob_sha
+3. cursor의 `head_sha`와 현재 `head_sha`가 같고 추가 이벤트가 없으면 그 레포는 빈 활동으로 둔다. 전부 그대로면 F3가 `no_change`를 낸다.
 
 constraints:
 
-- default toolset 전체(`all`) 금지.
-- Copilot / Actions / Security toolset 금지 (MVP 불필요, 일부는 Copilot 라이선스).
-- 페이지네이션은 레포당 커밋 30, 이슈 20, PR 20.
+- toolset `all` / Copilot / Actions / Security 금지
+- 클라이언트 전역 캐시 금지 (유저 PAT 교차 사용)
+- 로그에 PAT·Authorization 헤더 금지
 
-parallel-safe: yes — 레포 목록 fan-out 가능. 해커톤 1차는 직렬. GitHub secondary rate limit을 먼저 본다.
+parallel-safe: yes (레포 fan-out 가능). 1차는 직렬. secondary rate limit 우선.
 
-REMOVE: `agents/github_collect.py` 삭제 + F1에서 collect 호출 제거. F3 IN이 사라지므로 파이프라인 중단.
+REMOVE: `collect/github.py` 삭제 + F1 collect 호출 제거. F3 IN 소멸.
 
 ---
 
-### F3 ArtifactBuilder (variants)
+### F3 ArtifactBuilder
 
-PUBLIC (패키지 루트): `build_artifact`, `Artifact`  
-각 variant는 `build(snapshot, job, llm) -> Artifact` 하나만 export.
+PUBLIC: `build_artifact(snapshot, job, llm) -> ArtifactProposal`  
+각 variant: `build(...)` 하나.
 
-IN (main):
+IN (main): `snapshot: GitHubSnapshot` ← F2  
+IN (aux): `job: JobRequest` ← F1, `llm` ← root
 
-- `snapshot: GitHubSnapshot` ← F2
+OUT: `ArtifactProposal`
 
-IN (aux):
+FAIL: LLM 예외 `llm_failed`. 필수 프로필 누락 `blocked`. 쓰기는 하지 않음.
 
-- `job: JobRequest` ← F1
-- `llm` ← root
+공통:
 
-OUT: `Artifact`
-
-FAIL: `JobError(code=llm_failed|empty)`. 스냅샷이 비면 `empty` (retryable=false).
+- MCP 도구 없음. 레포 텍스트는 데이터로만 넣는다 (prompt injection 격리).
+- 기술 스택은 `languages` + `topics` + `manifest_files` + `profile_fields` 만. 없으면 빈 칸. 환각 금지.
+- 필드마다 `evidence_refs`를 채운다.
 
 #### F3-progress
 
-- 커밋/이슈/PR을 날짜순으로 묶어 한국어 진행 메모 마크다운 생성
-- `structured`: `{ commit_count, issue_count, pr_count, highlights: list[str] }`
-- `proposed_actions`: 비움. Notion 쓰기는 팀원
+- 커밋/이슈/PR을 날짜순 한국어 메모
+- snapshot이 비어 있고 `complete=true` 이면 `status=no_change`, `body_markdown=""`
+- `proposed_action=null`
 
-#### F3-portfolio
+#### F3-profile (`kind=portfolio|resume`)
 
-- 레포별 카드: 이름, 한 줄 설명, 추정 스택(언어/토픽), 최근 활동, 기여 한 줄
-- `structured`: `{ cards: list[PortfolioCard] }`
-- GitHub 언어/토픽이 없으면 빈 배열. 환각 스택을 넣지 않는다.
+- 템플릿 파일: `templates/{kind}/{version}.md`
+- 치환은 allowlist만. Jinja/조건식 금지.
+
+| placeholder | 출처 |
+| --- | --- |
+| `{{name}}` | `profile_fields.name` |
+| `{{contact_md}}` | `profile_fields.contact_md` |
+| `{{experience_md}}` | `profile_fields.experience_md` |
+| `{{education_md}}` | `profile_fields.education_md` |
+| `{{summary_md}}` | GitHub 활동 요약 (evidence 필수) |
+| `{{skills_md}}` | languages/topics/manifest (evidence 필수) |
+| `{{projects_md}}` | 레포 목록 + 최근 활동 (evidence 필수) |
+
+- resume는 `name`, `experience_md`, `education_md` 없으면 `blocked`
+- portfolio는 `name` 없으면 `blocked`, 경력/학력은 빈 문자열
+- `template_ref.sha256` = `templates/{kind}/{version}.md` 파일 해시. `kind`가 경로 전부다. 별도 `template_id` 없음
 
 #### F3-readme
 
-- README가 오래됐거나 비면 개선안 `body_markdown` 작성
-- **1차: PR을 실제로 만들지 않고** `proposed_actions=[{type:"create_pr", patch, title}]` 만 반환
-- 2차에서만 MCP write 도구로 PR 생성. 쓰기 경로를 나중에 연다.
+- 개선안 `replacement_markdown` + `proposed_action`
+- 현재 README와 동일하면 `no_change`
+- **PR을 만들지 않음**
+
+constraints: variant끼리 import 금지. GitHub 재호출 금지.
+
+parallel-safe: yes (job당 LLM 1회)
+
+REMOVE: variant 파일 삭제 + 맵 키 제거.
+
+---
+
+### F4 GitHubActionExecutor
+
+PUBLIC: `execute_readme_pr(req: ExecuteRequest, github_pat: str) -> ExecuteResult`
+
+IN (main): `req: ExecuteRequest` ← Spring  
+IN (aux): `github_pat` ← `X-GitHub-Pat`, `internal_key` ← `X-Internal-Key`
+
+OUT: `ExecuteResult`
+
+FAIL: digest 불일치 `rejected/validation`, SHA 불일치 `stale_sha`, 중복 `duplicate`, GitHub 401/429는 해당 코드.
+
+내부 로직:
+
+1. `path` allowlist 검사. `action.type` 은 `create_readme_pr` 만.
+2. `sha256(canonical(req.action)) == req.action_digest` 아니면 거절. `proposal_digest`는 보지 않음.
+3. `idempotency_key == proposal_id` 아니면 `validation`. 브랜치명 = `blocki/readme-{proposal_id}` (**UUID 전체**. 앞 8자만 쓰면 충돌). 키가 브랜치명으로 쓰인다.
+4. **멱등 (기록은 GitHub. 동시 재시도 포함)**
+   - 시작 시 그 head 브랜치의 PR을 **open/closed/merged 전부** 조회. 하나라도 있으면 `duplicate` + 그 `pr_url`. 커밋·새 PR 없음.
+   - 브랜치만 있고 PR 없음: blob == replacement 이면 PR만 생성. 다르고 expected SHA가 맞으면 파일 갱신 후 PR. SHA가 깨졌으면 `stale_sha`.
+   - 브랜치 없음: expected SHA 확인 → 브랜치 생성 → 커밋 → PR.
+   - 브랜치 생성·PR 생성이 409/422(already exists)이거나 레이스면 **한 번 재조회**(모든 상태 PR): PR이 있으면 `duplicate` + 그 URL. 브랜치만 있으면 위 “브랜치만” 경로. 재조회도 없으면 `internal` retryable=true.
+5. MCP write: `X-MCP-Toolsets: repos,pull_requests`, `X-MCP-Readonly: false`
+6. **default branch 직접 푸시 금지**
+
+Spring: 성공한 `proposal_id`를 실행 완료로 표시해 재전송을 줄인다. 줄이지 못해도 F4 재조회가 한 PR로 수렴해야 한다.
 
 constraints:
 
-- variant는 형제 variant를 import하지 않는다.
-- GitHub에 다시 붙지 않는다. 필요 데이터는 F2가 채운다.
+- LLM 없음
+- `approved: true` 불리언 없음
+- 이슈 생성, 파일 임의 경로, force push 없음
 
-parallel-safe: yes (순수 LLM 호출, job당 1회)
+parallel-safe: no (같은 레포 PR 경쟁). idempotency로 흡수.
 
-REMOVE: 해당 variant 파일 삭제 + `main.py` 맵에서 키 제거. 그 `job_type` 만 거절하면 된다.
+REMOVE: `execute/readme_pr.py` + `api/executions.py` 삭제. 제안 파이프라인은 남음.
 
 ---
 
 ## 7. Team contracts
 
-이 섹션이 스프링·노션 팀과 맞춰야 하는 전부다.
-
-### 7.1 담당 경계
+### 7.1 담당
 
 | 담당 | 한다 | 하지 않는다 |
 | --- | --- | --- |
-| **나 (AI / FastAPI / GitHub)** | Job API, GitHub MCP 클라이언트, 수집 순서, toolset/readonly 정책, 3개 그래프, PAT 로그 마스킹, rate-limit 에러 코드, Spring이 넣을 JobRequest 스키마 | 유저 DB, PAT 암호화 저장, 로그인, 공개 웹훅 URL, 프론트, Notion 페이지 쓰기 |
-| **Spring** | 가입/JWT, PAT·Notion 토큰 암호화 저장, 연결 UI API, 스케줄러가 FastAPI를 때림, GitHub webhook 수신→user 매핑→Job POST, job 로그/상태, 알림 | LangGraph, MCP 세션, 커밋 요약 프롬프트 |
-| **Notion 팀원** | Notion OAuth, refresh, `https://mcp.notion.com/mcp` 호출, 페이지/DB 스키마, F3 메모를 페이지에 씀 | GitHub MCP, 커밋 수집 |
+| **AI / FastAPI / GitHub** | Job·Execute API, MCP 수집/쓰기, 템플릿 파일, 3개 산출, digest, SHA 검사 | 유저 DB, PAT 금고, 로그인, 공개 웹훅, 스케줄 시계, Notion 페이지 |
+| **Spring** | JWT, PAT 암호화, `X-GitHub-Pat` 주입, 스케줄/웹훅→Job POST, proposal/버전 DB, 승인 UI, 알림 | LangGraph, MCP 세션, 템플릿 문구 생성 |
+| **Notion 팀원 (후순위)** | OAuth, 과거 포폴/이력서 `.md` 를 로그 페이지로 남김 | GitHub 수집, 승인 게이트 |
 
-「깃허브 파트 전부」의 해석: GitHub에서 데이터를 읽고 산출을 만드는 **실행 경로 전부**. 토큰 금고와 로그인 화면은 Spring.
+「깃허브 파트 전부」= GitHub 읽기·산출·승인 후 PR. 토큰 금고는 Spring.
 
-### 7.2 Spring → FastAPI
+### 7.2 HTTP
 
 `POST /internal/jobs`  
-header: `X-Internal-Key: <shared>`  
-body: `JobRequest`  
-response 200: `JobResult`
+headers: `X-Internal-Key`, `X-GitHub-Pat`  
+body: `JobRequest` (PAT 없음)  
+200: `JobResult`
 
-Spring 스케줄러 (매일/매주)와 webhook 핸들러가 같은 엔드포인트를 친다.
+`POST /internal/executions`  
+headers: 동일  
+body: `ExecuteRequest`  
+200: `ExecuteResult`
 
-GitHub webhook은 **Spring이 받는다**. FastAPI를 인터넷에 직접 열지 않는다.
+웹훅 URL은 Spring. FastAPI는 내부망.
 
 ### 7.3 PAT
 
-- 저장: Spring, 암호화
-- 전달: job body의 `github_pat` (요청 생명주기만)
-- FastAPI 디스크/DB에 쓰지 않음
-- 권장 fine-grained 권한: Metadata, Contents(read), Issues(read), Pull requests(read). README 2차만 Contents/PR write
-- Classic이면 `repo` + `read:user`
-- remote MCP OAuth(브라우저+Copilot 라이선스)는 백엔드 크론에 맞지 않다. **PAT를 쓴다.** 사용자 붙여넣은 설정이 맞다.
+- 저장: Spring 암호화
+- 전달: `X-GitHub-Pat` 만. body/state/checkpoint/로그 금지
+- 요청이 끝나면 FastAPI 메모리에서 버려짐
+- GitHub는 요청마다 PAT 스코프를 바꿀 수 없다. **유저 PAT 하나**를 Spring이 저장한다.
+- README PR을 쓸 계정이면 PAT에 Contents write + Pull requests write 가 처음부터 들어 있다.
+- “실행 시에만 쓰기”는 토큰 스코프가 아니라 FastAPI가 **F2에서 `X-MCP-Readonly: true`로 쓰기 도구를 안 열고, F4에서만 연다**는 뜻이다.
+- PR을 안 쓸 사용자는 read-only PAT로도 제안 파이프라인이 동작해야 한다. F4는 그때 401 → `github_auth`.
+- remote MCP OAuth(브라우저+Copilot)는 크론에 안 맞음. PAT 유지
 
-### 7.4 Notion 팀원에게 넘길 함정
+### 7.4 산출물 저장 (팀 합의)
 
-공식 호스트 MCP `https://mcp.notion.com/mcp` 는 **OAuth 2.1 + PKCE** 다. 브라우저 동의 없이 PAT만 넣는 구조가 아니다.
+1. FastAPI는 완성 `body_markdown` + `template_ref` + `snapshot_digest` + `proposal_digest` 를 반환한다.
+2. **원본 버전은 Spring DB.** 미리보기·승인·이력의 기준.
+3. Notion은 나중에 같은 `.md` 를 로그로 붙인다. FastAPI는 Notion을 호출하지 않는다.
 
-- access token 수명 ~8시간 (`expires_in` 사용)
-- refresh는 돌릴 때마다 새 refresh_token (동시 refresh 금지)
-- refresh 최대 180일, 30일 미사용 시 만료 → 재동의
-- 백그라운드 잡은 Spring이 유효 access token을 만든 뒤 FastAPI/노션 워커에 Bearer로 넘긴다
+### 7.5 승인
 
-해커톤에서 OAuth 세션이 빡세면 Notion **REST API + internal integration token** 이 크론에 더 잘 맞는다. 호스트 MCP를 꼭 쓰려면 Spring이 토큰 갱신을 맡아야 한다.
+Spring이 저장: `proposal_id, user_id, job_id, artifact_markdown, template_ref, snapshot_digest, action_json, action_digest, proposal_digest, status, created_at, expires_at`
 
-이 레포는 Notion을 호출하지 않는다. `Artifact.body_markdown` + `notion_handoff` 만 안정적으로 준다.
+사용자가 승인하면 Spring이 저장해 둔 `action_json` + `action_digest`를 `ExecuteRequest`로 보낸다. F4는 `hash(action)==action_digest` 와 expected SHA가 맞을 때만 PR을 연다. `proposal_digest`는 Spring이 미리보기 문서 무결성용이지 F4 실행 키가 아니다.
 
-### 7.5 MCP 설정 검증
+자동 반영은 옵션. 기본은 미리보기+승인. 스케줄러 1차는 알림만.
 
-사용자가 준 설정:
+### 7.6 MCP 설정 (재확인)
 
-Notion (정적, 팀원):
-
-```yaml
-mcp_servers:
-  notion:
-    url: "https://mcp.notion.com/mcp"
-```
-
-맞음. 호스트 공식 URL. 인증은 URL이 아니라 OAuth 토큰 헤더.
-
-GitHub (FastAPI가 job마다 동적 구성):
+GitHub (job마다 동적):
 
 ```yaml
 mcp_servers:
@@ -408,14 +591,37 @@ mcp_servers:
     url: "https://api.githubcopilot.com/mcp/"
     headers:
       Authorization: "Bearer {유저의_GitHub_PAT}"
+      X-MCP-Toolsets: "context,repos,issues,pull_requests"
+      X-MCP-Readonly: "true"   # F4만 false, toolsets에 pull_requests 유지
 ```
 
-맞음. 공식 remote 서버. 여기에 그래프별로 추가:
+Notion (후순위, 팀원):
 
-- `X-MCP-Toolsets: context,repos,issues,pull_requests`
-- `X-MCP-Readonly: true` (쓰기 job 제외)
+```yaml
+mcp_servers:
+  notion:
+    url: "https://mcp.notion.com/mcp"
+```
 
-`https://github.com/github/github-mcp-server` 는 구현체/문서 레포이지, FastAPI가 붙는 URL이 아니다.
+호스트 Notion MCP는 OAuth만. 크론은 Spring이 access token을 갱신해야 한다.
+
+`https://github.com/github/github-mcp-server` 는 문서 레포이지 호출 URL이 아니다.
+
+### 7.7 다른 의견(6에이전트) 판정
+
+| 제안 | 판정 | 이유 |
+| --- | --- | --- |
+| Spring → FastAPI → GitHub MCP | KEEP | 그대로 |
+| 분석→제안→승인→실행 | KEEP | F1–F3 / F4로 구현 |
+| 유저별 토큰 격리 | KEEP | 헤더 PAT, 클라이언트 job 단위 |
+| Orchestrator | CUT | Spring `job_type` |
+| Repo Analyzer | KEEP as F2 | 결정적 수집 |
+| Progress Tracker | MERGE | 감지는 F2, 요약은 F3-progress, cursor는 Spring |
+| README Writer | KEEP as F3-readme | 초안만 |
+| Portfolio Builder | CHANGE | resume와 같은 템플릿 렌더러 |
+| Action Executor | KEEP as F4 | 쓰기만 |
+| 채팅 의도 분석 | CUT (지금) | UI 버튼 → job_type. 채팅은 Spring이 매핑 |
+| 스케줄 자동 반영 | 마지막 | 1차는 notify |
 
 ---
 
@@ -423,62 +629,75 @@ mcp_servers:
 
 | 모듈 | 사용 |
 | --- | --- |
-| F1 | F2 함수, F3 선택 맵, env `INTERNAL_API_KEY` |
-| F2 | GitHub remote MCP (http) |
-| F3-* | F2 OUT + LLM. MCP 없음 |
+| F1 | F2, F3 맵, env 키 |
+| F2 | GitHub MCP read-only |
+| F3-* | F2 OUT + LLM + 템플릿 파일. MCP 없음 |
+| F4 | GitHub MCP write, ExecuteRequest |
 | C0 | 없음 |
 
-순환 없음. Feature↔Feature 직접 호출 없음.
+순환 없음. F3↔F4 직접 호출 없음. Spring이 둘을 잇는다.
 
 ---
 
 ## 9. Implementation checklist
 
-구현 순서 ( independently demo 가능하게):
+1. [ ] `contracts.py` + 템플릿 `portfolio/v1.md`, `resume/v1.md`
+2. [ ] `POST /internal/jobs` mock snapshot → `JobResult` (키 없으면 401, PAT 없으면 `missing_pat`)
+3. [ ] `scripts/ping_github_mcp.py` — 헤더 PAT로 `get_me` + 레포 1개
+4. [ ] F2 본구현 + MCP mock 테스트 (`complete`, cursor, 부분 실패)
+5. [ ] F3-progress + `no_change` (실패 아님)
+6. [ ] Spring 더미 POST로 진행 메모 E2E, DB 저장
+7. [ ] F3-readme preview + `proposal_digest`
+8. [ ] F4 PR E2E (승인 후). 여기까지가 데모 핵심
+9. [ ] F3-profile 템플릿 렌더 + evidence + Spring 버전 저장
+10. [ ] cron: 변화 없으면 `no_change` + notify. 자동 PR은 scoped 정책 이후
 
-1. [ ] `contracts.py` + `POST /internal/jobs` 가 mock snapshot으로 `JobResult` 반환
-2. [ ] contract test: 키 없으면 401, PAT 없으면 `missing_pat`
-3. [ ] F2: 실제 PAT로 `get_me` + 레포 1개 커밋 목록 (스크립트 `scripts/ping_github_mcp.py`)
-4. [ ] F2 본구현 + `test_github_collect` (MCP mock)
-5. [ ] F3-progress + 빈 스냅샷 `empty`
-6. [ ] Spring 더미 POST로 진행 메모 E2E
-7. [ ] F3-portfolio
-8. [ ] F3-readme (초안만, PR 생성 없음)
-9. [ ] rate-limit / 401 매핑
-10. [ ] (여유) readme PR write + webhook 연동은 Spring 스케줄 이후
+경계 테스트:
 
-경계 테스트 스텁:
-
-- F1: 잘못된 `job_type` → 422
-- F2: MCP 401 → `github_auth`, retryable=false
-- F3: snapshot.repos=[] → `empty`
+- F1: 잘못된 `job_type` → 422. profile인데 `document` 없음 → 422
+- F2: MCP 401 → `github_auth`. 429 → `github_rate_limit`. `complete=false`면 cursor 미갱신 문서화
+- F3: 빈 snapshot + complete → `no_change`. resume 학력 없음 → `blocked`
+- F3: languages 없이 스택을 지어내면 테스트 실패
+- F4: `action_digest` 불일치 거절. SHA 불일치 `stale_sha`. 같은 브랜치 PR이 어떤 상태든 있으면 `duplicate`+기존 URL. 경로 allowlist 밖이면 `validation`
 
 ---
 
 ## 10. Design Decision Log
 
 ```
-[SCALE  ] Small (코드 0파일) — Feature only, no C0
-[KEEP   ] MCP client 생성, header 조립 — F1 함수 (module floor / 사용처 1)
-[KEEP   ] env 읽기 — main.py only (hidden-input ban)
-[SPLIT  ] F2 collect vs F3 artifact — 변경 이유 2개 (MCP/수집 정책 vs 프롬프트/산출 스키마) + 독립 테스트
-[VARIANT] ArtifactBuilder {progress, portfolio, readme} — 명세 MVP에 이미 3개
-[LOCAL  ] Notion write — 0 use site here, teammate
-[LOCAL  ] 공통 Agent 프레임워크 / DI 컨테이너 — C0·확장 게이트 실패
-[MERGE  ] 스케줄러를 FastAPI에 두지 않음 — Spring 시계와 항상 같이 움직임. 넣으면 중복
-[KEEP   ] webhook 수신을 FastAPI에 두지 않음 — user 매핑은 Spring
-[KEEP   ] 수집을 LLM+전체 MCP tools 루프로 두지 않음 — 폭주·비용. F2가 도구를 고정 호출
-[LOCAL  ] 로컬 github-mcp-server Docker — remote PAT 경로가 이미 맞음
-[LOCAL  ] GitHub OAuth on FastAPI — Spring 인증과 충돌
+[SCALE  ] Small — Feature only, no C0
+[KEEP   ] F2 deterministic collect — MCP/rate-limit 변경 이유 + 3산출 재사용 + 독립 테스트
+[SPLIT  ] F4 execute out of F3 — 쓰기/멱등/SHA vs 프롬프트. 변경 이유 2 + 안전 주기 다름
+[MERGE  ] Progress Tracker — F2 감지 + F3-progress 요약 + Spring cursor
+[CUT    ] LLM Orchestrator — Spring typed job_type. 채팅 분류는 제품이 생기면 Spring
+[CUT    ] 6에이전트 스웜 — 해커톤 과분할, 도구 폭주
+[VARIANT] ArtifactBuilder {progress, profile_document, readme_proposal}
+[KEEP   ] portfolio|resume 한 렌더러 — 같은 IN/OUT, kind만 다름. 별 모듈 거부
+[CHANGE ] 포폴을 카드 JSON이 아니라 .md 템플릿 채움 — 팀 합의
+[CUT    ] JobRequest.notion — Notion 후순위, 계약 오염
+[CUT    ] 캘린더
+[CHANGE ] PAT body → X-GitHub-Pat — body/state 유출 차단 (sol)
+[CHANGE ] empty 실패 → no_change/partial/failed 분리 (sol)
+[CHANGE ] F2에 languages/topics/manifest/head_sha — F3 환각 방지에 필요
+[CHANGE ] F3 향후 PR 쓰기 문구 삭제 — F3는 순수 산출
+[KEEP   ] 분석→제안→승인→실행
+[LOCAL  ] 서명 approval_grant HMAC — 내부망 + X-Internal-Key면 해커톤 수용. digest는 승인 증명이 아니라 변조 검사다. 외부 노출 시 HMAC 추가
+[CHANGE ] proposal_digest와 action_digest 분리 — F4는 action 해시만 비교
+[CHANGE ] README path allowlist — 임의 경로 쓰기 차단
+[CHANGE ] PAT write 스코프는 요청마다 바뀌지 않음. 읽기 전용 헤더로 실행 경로만 연다
+[CHANGE ] F4 멱등: 브랜치=`blocki/readme-{proposal_id}` 전체 UUID. PR은 open/closed/merged 전부 조회. 409/422 후 재조회
+[CHANGE ] template_id 삭제. kind + version이 경로
+[LOCAL  ] FastAPI 스케줄러/웹훅
+[LOCAL  ] 로컬 github-mcp-server
+[LOCAL  ] GitHub OAuth on FastAPI
+[KEEP   ] 수집을 LLM+전체 MCP 루프로 두지 않음
 ```
 
----
+v0.1 → v0.2 마이그레이션 (문서만, 코드 없음):
 
-## 구현 시 내가 먼저 할 일 (의견)
+- `progress_memo` → `progress_summary`
+- `portfolio_card` → `profile_document`
+- 산출 HTTP와 실행 HTTP 분리
+- Notion handoff 삭제
 
-1. Spring과 `JobRequest`/`JobResult` JSON만 먼저 락. UI보다 이게 병목이다.
-2. PAT 하나 붙여 `scripts/ping_github_mcp.py`로 remote MCP가 200 나오는지 확인. 여기가 막히면 그래프는 의미 없다.
-3. 진행 메모 그래프만 데모 가능하게 만든다. 포폴·README는 같은 F2 스냅샷을 재사용한다.
-4. README 자동 PR은 심사 직전 여유분. 쓰기는 사고 반경이 크다.
-
-[self-check: 13/13 passed — C0 standalone N/A(none); parallel marks present; no migration (greenfield); extension gate logged]
+[self-check: 13/13 passed — C0 none; no migration code (greenfield); extension 3 variants logged; HMAC 거부는 decision log]
