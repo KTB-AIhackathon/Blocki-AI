@@ -1,0 +1,26 @@
+{
+  "fetched_at": "2026-08-19T15:18:12.337852+00:00",
+  "parent_page_id": "ebe0ffe9-306d-8232-9a92-8189e78f66d2",
+  "daily_template": {
+    "page_url": "https://app.notion.com/p/3c10ffe9306d81d98f59f76f80a34456?pvs=204",
+    "content": {
+      "metadata": {
+        "type": "page"
+      },
+      "title": "📘 일일 Developer TIL — 템플릿",
+      "url": "https://app.notion.com/p/3c10ffe9306d81d98f59f76f80a34456?pvs=204",
+      "text": "Here is the result of \"view\" for the Page with URL https://app.notion.com/p/3c10ffe9306d81d98f59f76f80a34456 as of 2026-08-19T15:16:28.847Z:\n<page url=\"https://app.notion.com/p/3c10ffe9306d81d98f59f76f80a34456\" icon=\"📘\">\n<ancestor-path>\n<parent-page url=\"https://app.notion.com/p/ebe0ffe9306d82329a928189e78f66d2\" title=\"주간 일정\"/>\n</ancestor-path>\n<properties>\n{\"title\":\"일일 Developer TIL — 템플릿\"}\n</properties>\n<content>\n> ✨ 오늘의 배움과 작업을 나중에도 설명할 수 있도록 결과와 근거를 함께 기록합니다.\n---\n## 📅 날짜\n<table header-row=\"true\">\n<tr>\n<td>항목</td>\n<td>내용</td>\n</tr>\n<tr>\n<td>작성일</td>\n<td>YYYY-MM-DD</td>\n</tr>\n<tr>\n<td>프로젝트</td>\n<td></td>\n</tr>\n<tr>\n<td>오늘의 주제</td>\n<td></td>\n</tr>\n<tr>\n<td>기술 스택</td>\n<td></td>\n</tr>\n<tr>\n<td>진행 상태</td>\n<td>계획 / 진행 중 / 완료</td>\n</tr>\n<tr>\n<td>소요 시간</td>\n<td></td>\n</tr>\n<tr>\n<td>포트폴리오 후보</td>\n<td>⭐ 예 / 아니요</td>\n</tr>\n<tr>\n<td>이력서 후보</td>\n<td>예 / 아니요</td>\n</tr>\n</table>\n---\n## 🎯 스크럼\n### 오늘의 목표\n- [ ] 학습 목표 1\n- [ ] 학습 목표 2\n- [ ] 작업 목표 3\n### 다음 작업\n- [ ] 다음에 이어서 할 작업\n- [ ] 추가로 확인할 내용\n---\n## 🛠️ 오늘 작업한 내용\n### 작업 1 · 작업 제목\n- **목적:** 왜 이 작업이 필요했나요?\n- **구현 내용:** 무엇을 만들거나 변경했나요?\n- **사용 기술:** 어떤 기술과 도구를 사용했나요?\n- **결과:** 작업 후 무엇이 달라졌나요?\n---\n## 📚 새로 배운 내용\n### 주제 1 · 학습한 개념\n- **한 줄 요약:**\n- **상세 내용:**\n- **적용 방법:**\n- **기존에 알던 내용과의 차이:**\n### 주제 2 · 학습한 개념\n- **한 줄 요약:**\n- **상세 내용:**\n- **적용 방법:**\n---\n## 🧩 오늘의 도전 과제와 해결 방법\n### 문제 1 · 문제 제목\n- **문제:** 어떤 문제가 발생했나요?\n- **원인:** 문제가 발생한 이유는 무엇인가요?\n- **시도:** 어떤 방법들을 시도했나요?\n- **해결:** 최종적으로 어떻게 해결했나요?\n- **결과:** 해결 전후 무엇이 달라졌나요?\n- **재발 방지:** 다음에는 어떻게 예방할 수 있나요?\n---\n## 💻 GitHub 작업 근거\n### Commit\n<table header-row=\"true\">\n<tr>\n<td>저장소</td>\n<td>커밋 SHA·링크</td>\n<td>변경 내용</td>\n<td>결과</td>\n</tr>\n<tr>\n<td></td>\n<td></td>\n<td></td>\n<td></td>\n</tr>\n</table>\n### Pull Request\n<table header-row=\"true\">\n<tr>\n<td>PR 링크</td>\n<td>담당 내용</td>\n<td>리뷰·피드백</td>\n<td>상태</td>\n</tr>\n<tr>\n<td></td>\n<td></td>\n<td></td>\n<td>Open / Merged / Closed</td>\n</tr>\n</table>\n### 기타 근거\n- **Issue:** [#번호 · Issue 제목](https://github.com/)\n- **배포·데모:** [결과 확인](https://example.com/)\n- **관련 문서:** [문서 보기](https://example.com/)\n---\n## 🪞 오늘의 회고\n- **잘한 점:**\n- **아쉬운 점:**\n- **새롭게 시도할 점:**\n- **오늘의 한 문장:**\n---\n## 🔗 참고 자료 및 링크\n- [공식 문서](https://example.com/) — 확인한 내용\n- [참고 자료](https://example.com/) — 적용한 부분\n---\n## ⭐ 포트폴리오 후보\n> 이 기록을 포트폴리오나 이력서에 사용할 때만 작성합니다.\n- **후보 여부:** ⭐ 예 / 아니요\n- **프로젝트 역할:**\n- **핵심 문제:**\n- **나의 해결 방법:**\n- **정량적 결과:**\n- **강조할 기술:**\n- **증빙 링크:**\n- **포트폴리오 한 줄 요약:**\n- **이력서 문장 초안:**\n</content>\n</page>"
+    }
+  },
+  "dashboard": {
+    "page_url": "https://app.notion.com/p/3c10ffe9306d811891f1f6920a8013b8?pvs=204",
+    "content": {
+      "metadata": {
+        "type": "page"
+      },
+      "title": "🧑‍💻 Developer TIL Dashboard",
+      "url": "https://app.notion.com/p/3c10ffe9306d811891f1f6920a8013b8?pvs=204",
+      "text": "Here is the result of \"view\" for the Page with URL https://app.notion.com/p/3c10ffe9306d811891f1f6920a8013b8 as of 2026-08-19T15:16:31.690Z:\n<page url=\"https://app.notion.com/p/3c10ffe9306d811891f1f6920a8013b8\" icon=\"🧑‍💻\">\n<ancestor-path>\n<parent-page url=\"https://app.notion.com/p/ebe0ffe9306d82329a928189e78f66d2\" title=\"주간 일정\"/>\n</ancestor-path>\n<properties>\n{\"title\":\"Developer TIL Dashboard\"}\n</properties>\n<content>\n> 💡 매일의 배움과 GitHub 작업 기록을 모아 포트폴리오와 이력서의 근거로 활용합니다.\n---\n## 🗓️ 주간 TIL 목록\n### \\[YYYY년 MM월 N주차\\] · 핵심 주제\n- `YY.MM.DD` · [세부 주제 1](https://app.notion.com/p/3c10ffe9306d81d98f59f76f80a34456)\n- `YY.MM.DD` · [세부 주제 2](https://app.notion.com/p/3c10ffe9306d81d98f59f76f80a34456)\n- `YY.MM.DD` · [세부 주제 3](https://app.notion.com/p/3c10ffe9306d81d98f59f76f80a34456)\n- `YY.MM.DD` · [세부 주제 4](https://app.notion.com/p/3c10ffe9306d81d98f59f76f80a34456)\n### \\[YYYY년 MM월 N주차\\] · 핵심 주제\n- `YY.MM.DD` · [세부 주제 1](https://app.notion.com/p/3c10ffe9306d81d98f59f76f80a34456)\n- `YY.MM.DD` · [세부 주제 2](https://app.notion.com/p/3c10ffe9306d81d98f59f76f80a34456)\n---\n## 📌 이번 주 요약\n<table header-row=\"true\">\n<tr>\n<td>항목</td>\n<td>기록</td>\n</tr>\n<tr>\n<td>🧠 핵심 학습</td>\n<td></td>\n</tr>\n<tr>\n<td>✅ 완료한 작업</td>\n<td></td>\n</tr>\n<tr>\n<td>🧩 해결한 문제</td>\n<td></td>\n</tr>\n<tr>\n<td>🛠️ 사용한 기술</td>\n<td></td>\n</tr>\n<tr>\n<td>🔗 대표 커밋·PR</td>\n<td></td>\n</tr>\n<tr>\n<td>⭐ 포트폴리오 후보</td>\n<td>예 / 보류</td>\n</tr>\n</table>\n---\n## 🚀 빠른 시작\n1. [일일 TIL 템플릿](https://app.notion.com/p/3c10ffe9306d81d98f59f76f80a34456)을 복제합니다.\n2. 제목을 `YYYY-MM-DD · 주제` 형식으로 변경합니다.\n3. 작업 결과와 GitHub 근거 링크를 함께 기록합니다.\n4. 포트폴리오 후보라면 마지막 섹션을 완성합니다.\n> 🔒 `##` 섹션 제목은 MCP 자동 수집을 위해 유지해 주세요.\n</content>\n</page>"
+    }
+  }
+}

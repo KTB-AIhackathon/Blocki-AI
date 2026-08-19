@@ -1,9 +1,12 @@
 """Official Notion MCP transport with a user-scoped OAuth provider."""
 
 import asyncio
+import fcntl
 import json
 import os
-from contextlib import asynccontextmanager
+import tempfile
+import threading
+from contextlib import asynccontextmanager, contextmanager
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 from typing import Any, Awaitable, Callable, Dict
@@ -25,6 +28,9 @@ MCP_SERVER_URL = "https://mcp.notion.com/mcp"
 # Notion advertises the resource as the full /mcp URL; a bare origin fails resource validation.
 MCP_OAUTH_SERVER_URL = MCP_SERVER_URL
 DEFAULT_TOKEN_PATH = Path("work/notion-mcp-tokens.json")
+DEFAULT_TARGET_PATH = Path("work/notion-target.json")
+TARGET_PATH = DEFAULT_TARGET_PATH
+_TARGET_LOCK = threading.Lock()
 AuthForUser = Callable[[str], Awaitable[httpx2.Auth] | httpx2.Auth]
 
 
@@ -72,6 +78,79 @@ class FileTokenStorage(TokenStorage):
         data = self._read()
         data["client_info"] = client_info.model_dump(mode="json")
         self._write(data)
+
+
+def _read_target_data() -> Dict[str, Any]:
+    if not TARGET_PATH.exists():
+        return {}
+    try:
+        data = json.loads(TARGET_PATH.read_text())
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _target_data() -> Dict[str, Any]:
+    with _target_store_lock():
+        return _read_target_data()
+
+
+@contextmanager
+def _target_store_lock():
+    with _TARGET_LOCK:
+        TARGET_PATH.parent.mkdir(parents=True, exist_ok=True)
+        lock_path = TARGET_PATH.with_name(TARGET_PATH.name + ".lock")
+        descriptor = os.open(lock_path, os.O_RDWR | os.O_CREAT, 0o600)
+        try:
+            os.fchmod(descriptor, 0o600)
+            fcntl.flock(descriptor, fcntl.LOCK_EX)
+            yield
+        finally:
+            try:
+                fcntl.flock(descriptor, fcntl.LOCK_UN)
+            finally:
+                os.close(descriptor)
+
+
+def _write_target_data_unlocked(data: Dict[str, Any]) -> None:
+    TARGET_PATH.parent.mkdir(parents=True, exist_ok=True)
+    descriptor, temporary_name = tempfile.mkstemp(
+        prefix=f".{TARGET_PATH.name}.", dir=TARGET_PATH.parent
+    )
+    temporary_path = Path(temporary_name)
+    try:
+        os.fchmod(descriptor, 0o600)
+        with os.fdopen(descriptor, "w") as file:
+            json.dump(data, file, ensure_ascii=False, indent=2)
+            file.write("\n")
+        descriptor = -1
+        os.replace(temporary_path, TARGET_PATH)
+    finally:
+        if descriptor != -1:
+            os.close(descriptor)
+        temporary_path.unlink(missing_ok=True)
+
+
+def _validate_target_key(kind: str) -> None:
+    if not isinstance(kind, str) or not kind.strip():
+        raise ValueError("target kind must be a non-empty string")
+
+
+def save_target(user_id: str, page_id: str, page_url: str, kind: str) -> None:
+    _validate_target_key(kind)
+    with _target_store_lock():
+        data = _read_target_data()
+        targets = data.get(user_id)
+        if not isinstance(targets, dict):
+            targets = {}
+            data[user_id] = targets
+        targets[kind] = {"page_id": page_id, "page_url": page_url}
+        _write_target_data_unlocked(data)
+
+
+def load_target(user_id: str) -> Dict[str, Dict[str, str]]:
+    targets = _target_data().get(user_id, {})
+    return targets if isinstance(targets, dict) else {}
 
 
 def build_notion_mcp_auth(
@@ -274,7 +353,15 @@ class NotionMcpClient:
                 raise RuntimeError("Notion MCP fetch failed")
             return result.model_dump(mode="json")
 
-    async def create_page(self, user_id: str, title: str, markdown: str) -> Dict[str, str]:
+    async def create_page(
+        self,
+        user_id: str,
+        title: str,
+        markdown: str,
+        remember_as: str | None = None,
+    ) -> Dict[str, str]:
+        if remember_as is not None:
+            _validate_target_key(remember_as)
         tool_name = "notion-create-pages"
         async with self._session(user_id) as session:
             tool = next(
@@ -299,4 +386,9 @@ class NotionMcpClient:
                     f"Notion MCP tool {tool_name!r} returned no page_id/page_url; "
                     f"schema: {_schema_text(tool.input_schema)}"
                 )
+            if remember_as is not None:
+                save_target(user_id, page["page_id"], page["page_url"], remember_as)
             return page
+
+    def target_page(self, user_id: str, kind: str) -> Dict[str, str] | None:
+        return load_target(user_id).get(kind)
