@@ -4,7 +4,9 @@ Spring만 호출하는 내부 FastAPI 워커다. 브라우저는 이 서버를 �
 
 하는 일: 유저 GitHub PAT로 remote GitHub MCP를 읽고, 진행 메모·이력서/포폴·README 초안을 만든 뒤, 승인된 README만 PR로 연다.
 
-하지 않는 일: 유저 DB, 토큰 금고, 공개 OAuth, Notion 호출, Job 상태 저장.
+하지 않는 일: 유저 DB, 토큰 금고, 공개 OAuth, Job 상태 저장.
+
+Notion TIL 수집기는 `app/collect/notion.py`에 있다. 자체 MCP OAuth로 붙고 토큰은 로컬 파일에 둔다. Spring이 토큰을 대신 들고 오는 구조가 확정되면 이 부분을 걷어낸다.
 
 설계: [`DESIGN.md`](DESIGN.md). Spring이 맞춰야 할 공개 명세 수정은 `Docs/spring-api-revision.md`.
 

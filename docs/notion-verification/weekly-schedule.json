@@ -1,0 +1,106 @@
+{
+  "source": "notion_mcp",
+  "user_id": "local-user",
+  "page_url": "https://app.notion.com/p/ebe0ffe9306d82329a928189e78f66d2?pvs=204",
+  "fetched_at": "2026-08-19T11:59:09.689417+00:00",
+  "content": {
+    "title": "📘 주간 일정",
+    "text": "Here is the result of \"view\" for the Page with URL https://app.notion.com/p/ebe0ffe9306d82329a928189e78f66d2 as of 2026-08-19T10:08:11.881Z:\n<page url=\"https://app.notion.com/p/ebe0ffe9306d82329a928189e78f66d2\" icon=\"📘\">\n<ancestor-path></ancestor-path>\n<properties>\n{\"title\":\"주간 일정\"}\n</properties>\n<content>\n<columns>\n\t<column ratio=\"14.29\">\n\t\t## 월요일\n\t\t---\n\t\t- [x] 주간 회의 준비하기 📝\n\t\t- [x] 지연과 1대 1 👥 {color=\"red_bg\"}\n\t\t<empty-block/>\n\t\t<empty-block/>\n\t\t<empty-block/>\n\t\t<empty-block/>\n\t\t<empty-block/>\n\t\t<empty-block/>\n\t\t<empty-block/>\n\t</column>\n\t<column ratio=\"14.29\">\n\t\t## 화요일\n\t\t---\n\t\t- [x] 이사회 발표 자료 준비하기\n\t\t\t- [x] PDF 준비하기 🖨️\n\t\t\t- [x] 이메일 보내기 ✉️\n\t\t<empty-block/>\n\t</column>\n\t<column ratio=\"14.29\">\n\t\t## 수요일\n\t\t---\n\t\t- [x] 드라이클리닝 찾아오기 👕\n\t\t- [x] 유석과 점심 🥪모\n\t\t<empty-block/>\n\t</column>\n\t<column ratio=\"14.29\">\n\t\t## 목요일\n\t\t---\n\t\t- [ ] 지연 돌잔치 👶\n\t\t- [ ] 정수와 저녁 🍽️\n\t\t<empty-block/>\n\t</column>\n\t<column ratio=\"14.29\">\n\t\t## 금요일\n\t\t---\n\t\t- [ ] 마케팅 직무 채용 설명회 🥪\n\t</column>\n\t<column ratio=\"14.29\">\n\t\t## 토요일\n\t\t---\n\t\t- [ ] 장보기 리스트\n\t\t\t- [ ] 휴지 🧻\n\t\t\t- [ ] 야채 🥒\n\t\t\t- [ ] 음료 🥤\n\t</column>\n\t<column ratio=\"14.29\">\n\t\t## 일요일\n\t\t---\n\t\t- [ ] 공동 창업자 회의\n\t\t<empty-block/>\n\t</column>\n</columns>\n<empty-block/>\n---\n<empty-block/>\n<empty-block/>\n</content>\n</page>",
+    "metadata": {
+      "id": "ebe0ffe9306d82329a928189e78f66d2",
+      "type": "page"
+    }
+  },
+  "tasks": [
+    {
+      "day": "월요일",
+      "title": "주간 회의 준비하기 📝",
+      "completed": true,
+      "parent": null
+    },
+    {
+      "day": "월요일",
+      "title": "지연과 1대 1 👥",
+      "completed": true,
+      "parent": null
+    },
+    {
+      "day": "화요일",
+      "title": "이사회 발표 자료 준비하기",
+      "completed": true,
+      "parent": null
+    },
+    {
+      "day": "화요일",
+      "title": "PDF 준비하기 🖨️",
+      "completed": true,
+      "parent": "이사회 발표 자료 준비하기"
+    },
+    {
+      "day": "화요일",
+      "title": "이메일 보내기 ✉️",
+      "completed": true,
+      "parent": "이사회 발표 자료 준비하기"
+    },
+    {
+      "day": "수요일",
+      "title": "드라이클리닝 찾아오기 👕",
+      "completed": true,
+      "parent": null
+    },
+    {
+      "day": "수요일",
+      "title": "유석과 점심 🥪모",
+      "completed": true,
+      "parent": null
+    },
+    {
+      "day": "목요일",
+      "title": "지연 돌잔치 👶",
+      "completed": false,
+      "parent": null
+    },
+    {
+      "day": "목요일",
+      "title": "정수와 저녁 🍽️",
+      "completed": false,
+      "parent": null
+    },
+    {
+      "day": "금요일",
+      "title": "마케팅 직무 채용 설명회 🥪",
+      "completed": false,
+      "parent": null
+    },
+    {
+      "day": "토요일",
+      "title": "장보기 리스트",
+      "completed": false,
+      "parent": null
+    },
+    {
+      "day": "토요일",
+      "title": "휴지 🧻",
+      "completed": false,
+      "parent": "장보기 리스트"
+    },
+    {
+      "day": "토요일",
+      "title": "야채 🥒",
+      "completed": false,
+      "parent": "장보기 리스트"
+    },
+    {
+      "day": "토요일",
+      "title": "음료 🥤",
+      "completed": false,
+      "parent": "장보기 리스트"
+    },
+    {
+      "day": "일요일",
+      "title": "공동 창업자 회의",
+      "completed": false,
+      "parent": null
+    }
+  ]
+}
