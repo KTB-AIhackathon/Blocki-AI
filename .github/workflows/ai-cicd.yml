@@ -1,0 +1,131 @@
+name: AI CI/CD
+
+on:
+  pull_request:
+    branches: [main]
+
+  push:
+    branches: [main]
+
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: blocki-ai-production
+  cancel-in-progress: false
+
+jobs:
+  ci:
+    name: AI Test
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 소스 내려받기
+        uses: actions/checkout@v4
+
+      - name: Python 3.12 설정
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: 의존성 설치
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev,anthropic,codex]"
+
+      - name: 테스트 실행
+        run: pytest -q
+
+  deploy:
+    name: Deploy to AI EC2
+    needs: ci
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: SSH 개인키 설정
+        env:
+          EC2_SSH_PRIVATE_KEY: ${{ secrets.EC2_SSH_PRIVATE_KEY }}
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$EC2_SSH_PRIVATE_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+
+      - name: AI 이미지 빌드 및 배포
+        env:
+          EC2_HOST: ${{ secrets.EC2_HOST }}
+          EC2_USER: ${{ secrets.EC2_USER }}
+          DEPLOY_SHA: ${{ github.sha }}
+        run: |
+          ssh \
+            -o StrictHostKeyChecking=no \
+            -o UserKnownHostsFile=/dev/null \
+            "$EC2_USER@$EC2_HOST" \
+            "DEPLOY_SHA=$DEPLOY_SHA bash -s" <<'REMOTE'
+          set -Eeuo pipefail
+
+          APP_DIR=/opt/blocki-ai
+          APP_NAME=blocki-ai
+          PREVIOUS_NAME=blocki-ai-previous
+          IMAGE_TAG="blocki-ai:${DEPLOY_SHA:0:7}"
+          HAS_PREVIOUS=false
+
+          rollback() {
+            echo "배포 실패: 직전 컨테이너로 복구합니다."
+
+            docker rm -f "$APP_NAME" >/dev/null 2>&1 || true
+
+            if [ "$HAS_PREVIOUS" = "true" ] \
+              && docker container inspect "$PREVIOUS_NAME" >/dev/null 2>&1; then
+              docker rename "$PREVIOUS_NAME" "$APP_NAME"
+              docker start "$APP_NAME"
+            fi
+          }
+
+          cd "$APP_DIR"
+
+          if [ -n "$(git status --porcelain)" ]; then
+            echo "서버 소스에 커밋되지 않은 변경 사항이 있어 배포를 중단합니다."
+            exit 1
+          fi
+
+          git fetch --depth=50 origin main
+          git checkout --detach -f "$DEPLOY_SHA"
+
+          echo "Docker 이미지 빌드: $IMAGE_TAG"
+          docker build -t "$IMAGE_TAG" .
+
+          if docker container inspect "$APP_NAME" >/dev/null 2>&1; then
+            docker rm -f "$PREVIOUS_NAME" >/dev/null 2>&1 || true
+            docker stop "$APP_NAME"
+            docker rename "$APP_NAME" "$PREVIOUS_NAME"
+            HAS_PREVIOUS=true
+          fi
+
+          if ! docker run -d \
+            --name "$APP_NAME" \
+            --restart unless-stopped \
+            --env-file "$APP_DIR/.env" \
+            -p 8000:8000 \
+            "$IMAGE_TAG"; then
+            rollback
+            exit 1
+          fi
+
+          for attempt in {1..20}; do
+            if curl -fsS http://127.0.0.1:8000/health >/dev/null; then
+              echo "AI 서버 배포 및 헬스체크 성공"
+              docker ps --filter "name=$APP_NAME"
+              exit 0
+            fi
+
+            sleep 2
+          done
+
+          echo "AI 서버 헬스체크 실패"
+          docker logs --tail 100 "$APP_NAME" || true
+          rollback
+          exit 1
+          REMOTE
