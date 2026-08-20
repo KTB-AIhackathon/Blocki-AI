@@ -126,10 +126,7 @@ def first_dict(rows: list[Any]) -> dict[str, Any] | None:
 
 
 def http_status(exc: BaseException | None, text: str) -> int | None:
-    cur = exc
-    for _ in range(4):
-        if cur is None:
-            break
+    for cur in _walk_exceptions(exc):
         for attr in ("status_code", "status"):
             value = getattr(cur, attr, None)
             if isinstance(value, int) and value > 0:
@@ -139,8 +136,6 @@ def http_status(exc: BaseException | None, text: str) -> int | None:
             value = getattr(response, "status_code", None)
             if isinstance(value, int) and value > 0:
                 return value
-        nxt = cur.__cause__ or cur.__context__
-        cur = nxt if isinstance(nxt, BaseException) else None
     match = _STATUS_RE.search(text)
     if match:
         return int(match.group(1))
@@ -153,6 +148,24 @@ def http_status(exc: BaseException | None, text: str) -> int | None:
     if "forbidden" in low or "not accessible" in low or "insufficient scope" in low:
         return 403
     return None
+
+
+def _walk_exceptions(exc: BaseException | None) -> list[BaseException]:
+    found: list[BaseException] = []
+    seen: set[int] = set()
+    stack = [exc]
+    while stack and len(found) < 16:
+        cur = stack.pop()
+        if cur is None or id(cur) in seen:
+            continue
+        seen.add(id(cur))
+        found.append(cur)
+        stack.append(cur.__cause__)
+        stack.append(cur.__context__)
+        group = getattr(cur, "exceptions", None)
+        if group:
+            stack.extend(group)
+    return found
 
 
 def text_of(value: Any) -> str | None:

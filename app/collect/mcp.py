@@ -1,9 +1,8 @@
-"""Read-only GitHub MCP adapter.
+"""GitHub collect session.
 
-Exposes a small logical tool surface (`get_me`, `list_repos`, `get_repo_meta`,
-`list_commits`, `list_issues`, `list_pull_requests`, `get_file`) so the
-collector never has to know MCP tool names or payload shapes. Tests substitute
-a plain `call_tool` callable instead of opening a session.
+Logical tool names (`get_me`, `list_repos`, …) stay stable so `collect_github`
+and tests do not care about transport. The live session is GitHub REST;
+hosted Copilot MCP is not used for collect.
 """
 
 from __future__ import annotations
@@ -23,42 +22,9 @@ def mcp_url() -> str:
 
 
 async def open_read_session(github_pat: str) -> CallTool:
-    from langchain_mcp_adapters.client import MultiServerMCPClient
+    from app.collect.github_rest import open_rest_session
 
-    client = MultiServerMCPClient(
-        {
-            "github": {
-                "transport": "http",
-                "url": mcp_url(),
-                "headers": {
-                    "Authorization": f"Bearer {github_pat}",
-                    "X-MCP-Toolsets": TOOLSETS,
-                    "X-MCP-Readonly": "true",
-                },
-            }
-        },
-        handle_tool_errors=False,
-    )
-    tools = {t.name: t for t in await client.get_tools()}
-    viewer: dict[str, str | None] = {"login": None}
-
-    async def invoke(name: str, args: dict[str, Any]) -> Any:
-        tool = tools.get(name)
-        if tool is None:
-            raise RuntimeError(f"mcp tool missing: {name}")
-        for attempt in range(3):
-            try:
-                return parse.jsonish(await tool.ainvoke(args))
-            except BaseException as exc:
-                if parse.http_status(exc, str(exc)) == 429 and attempt < 2:
-                    continue
-                raise
-        raise RuntimeError(f"mcp tool exhausted retries: {name}")
-
-    async def call_tool(name: str, args: dict[str, Any]) -> Any:
-        return await _logical(invoke, viewer, name, args or {})
-
-    return call_tool
+    return await open_rest_session(github_pat)
 
 
 async def _logical(invoke, viewer: dict[str, str | None], name: str, args: dict[str, Any]) -> Any:
