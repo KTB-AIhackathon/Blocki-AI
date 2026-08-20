@@ -67,7 +67,8 @@ async def test_document_pipeline_renders_grounded_sections(job_type: str) -> Non
         assert "Python" in body and "FastAPI" in body
     else:
         assert common.FILL_IN in body
-    assert "결제 API 구현" not in body
+    assert "결제 API 구현" in body
+    assert "aaaaaaa" not in body
     assert "pyproject.toml" not in body
     assert PAT not in body
     assert proposal.template_ref is not None

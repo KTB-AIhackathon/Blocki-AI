@@ -128,6 +128,59 @@ def test_dashboard_example_pages_are_not_collected_as_the_users_til() -> None:
     assert not any("[예시]" in title for title in collected)
 
 
+def test_undated_title_is_collected_when_the_body_table_has_a_date() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        path = request.url.path
+        if path.endswith("/blocks/dashboard/children"):
+            return httpx.Response(
+                200,
+                json={
+                    "results": [
+                        {
+                            "id": "page-free",
+                            "type": "child_page",
+                            "child_page": {"title": "캐시 개선"},
+                        }
+                    ],
+                    "has_more": False,
+                },
+            )
+        if "/blocks/" in path and path.endswith("/children"):
+            return httpx.Response(200, json={"results": [], "has_more": False})
+        if path.endswith("/pages/page-free"):
+            return httpx.Response(
+                200,
+                json={
+                    "id": "page-free",
+                    "properties": {"title": {"title": [{"plain_text": "캐시 개선"}]}},
+                },
+            )
+        if path.endswith("/pages/page-free/markdown"):
+            return httpx.Response(
+                200,
+                json={
+                    "markdown": (
+                        "| 항목 | 내용 |\n| --- | --- |\n"
+                        "| 날짜 | 2026-08-18 |\n"
+                        "| Repository | https://github.com/acme/cache |\n"
+                    )
+                },
+            )
+        return httpx.Response(404, json={"message": "not found"})
+
+    async def run() -> NotionSnapshot:
+        async with httpx.AsyncClient(
+            base_url="https://api.notion.com/v1",
+            transport=httpx.MockTransport(handler),
+        ) as client:
+            return await collect_notion_til("dashboard", NOTION_TOKEN, client=client)
+
+    snapshot = asyncio.run(run())
+    assert [(entry.date, entry.title) for entry in snapshot.entries] == [
+        (date(2026, 8, 18), "캐시 개선")
+    ]
+
+
 def test_generated_project_logs_are_not_walked_as_til() -> None:
     seen_children: list[str] = []
 

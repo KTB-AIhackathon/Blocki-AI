@@ -5,6 +5,7 @@ from datetime import date, datetime, timezone
 import pytest
 
 from app.contracts import (
+    CommitFact,
     DocumentSpec,
     Evidence,
     GitHubSnapshot,
@@ -16,6 +17,7 @@ from app.contracts import (
     SkillFact,
     TilFact,
     ViewerIdentity,
+    WorkItem,
 )
 from app.pipelines.portfolio.build import build as build_portfolio
 from app.pipelines.resume.build import build as build_resume
@@ -167,6 +169,68 @@ async def test_resume_uses_profile_readme_sections_as_confirmable_drafts() -> No
     assert "- 백엔드 개발" in proposal.body_markdown
     assert "- 컴퓨터공학" in proposal.body_markdown
     assert "- Python" in proposal.body_markdown
+
+
+@pytest.mark.asyncio
+async def test_empty_structured_slots_fall_back_to_github_titles_and_til_titles() -> None:
+    learned = TilFact(
+        id="til:cache",
+        date=date(2026, 8, 20),
+        title="캐시 개선",
+        body_markdown="응답 시간이 줄었다.\n배포 후 확인했다.",
+        page_id="p1",
+    )
+    project = _project("acme/cache", [learned]).model_copy(
+        update={
+            "highlights": [
+                CommitFact(
+                    id="commit:acme/cache:aaaaaaaaaaaa",
+                    repo="acme/cache",
+                    sha="a" * 12,
+                    subject="feat: 캐시 레이어",
+                )
+            ],
+            "pull_requests": [
+                WorkItem(
+                    id="pr:acme/cache#1",
+                    repo="acme/cache",
+                    number=1,
+                    title="feat: 캐시 PR",
+                    source_type="pr",
+                )
+            ],
+        }
+    )
+    empty = _project("acme/empty").model_copy(
+        update={
+            "highlights": [
+                CommitFact(
+                    id="commit:acme/empty:bbbbbbbbbbbb",
+                    repo="acme/empty",
+                    sha="b" * 12,
+                    subject="feat: 결제 API 구현",
+                )
+            ]
+        }
+    )
+    folio = await build_portfolio(
+        _job("portfolio"),
+        GitHubSnapshot(collected_at=NOW, complete=True, snapshot_digest="g" * 64),
+        _evidence([project, empty, _project("acme/third")]),
+    )
+    resume = await build_resume(
+        _job("resume"),
+        GitHubSnapshot(collected_at=NOW, complete=True, snapshot_digest="g" * 64),
+        _evidence([empty]),
+    )
+
+    folio_cards = folio.body_markdown.split("## 프로젝트", 1)[1]
+    cache_card = folio_cards.split("### 1.", 1)[1].split("### 2.", 1)[0]
+    empty_card = folio_cards.split("### 2.", 1)[1].split("### 3.", 1)[0]
+    assert "캐시 개선" in cache_card.split("**성장**", 1)[1]
+    assert "응답 시간이 줄었다." in cache_card
+    assert "feat: 결제 API 구현" in empty_card.split("**성과**", 1)[1]
+    assert "feat: 결제 API 구현" in resume.body_markdown.split("**성과**", 1)[1]
 
 
 def _card_blocks(section: str) -> list[str]:

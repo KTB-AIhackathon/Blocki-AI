@@ -8,6 +8,7 @@ from app.analyze import skills as skill_analysis
 from app.contracts import Evidence, EvidenceRef, ProjectFacts, SkillFact
 from app.llm.guard import GroundedText
 from app.pipelines import common
+from app.pipelines.portfolio.briefs import til_excerpt
 from app.pipelines.portfolio.team import Dossier
 
 Section = tuple[str, list[EvidenceRef]]
@@ -131,7 +132,13 @@ def _project_block(
                 parts.append(f"- {metric}")
                 refs.extend(common.til_field_refs("projects_md", item, "metric"))
     else:
-        parts.append(f"- {_fill_text()}")
+        fallback = common.work_titles(facts, "projects_md", MAX_ACHIEVEMENTS)
+        if fallback:
+            for title, ref in fallback:
+                parts.append(f"- {title}")
+                refs.append(ref)
+        else:
+            parts.append(f"- {_fill_text()}")
 
     parts.extend(["", "**성장**"])
     growth = _til_values(facts, "learned", MAX_GROWTH) + _til_values(facts, "retro", MAX_GROWTH)
@@ -139,6 +146,18 @@ def _project_block(
         for value, item, field in growth[:MAX_GROWTH]:
             parts.append(f"- {value}")
             refs.extend(common.til_field_refs("projects_md", item, field))
+    elif facts.til:
+        added = False
+        for item in facts.til:
+            title = (item.title or "").strip()
+            if not title:
+                continue
+            parts.append(f"- {item.date:%Y-%m-%d} · {title}")
+            refs.append(common.til_ref("projects_md", item))
+            parts.extend(f"  - {line}" for line in til_excerpt(item.body_markdown))
+            added = True
+        if not added:
+            parts.append(f"- {_fill_text()}")
     else:
         parts.append(f"- {_fill_text()}")
     return "\n".join(parts).rstrip(), refs

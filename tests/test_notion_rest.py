@@ -6,7 +6,7 @@ import httpx
 import pytest
 
 from app.publish.notion_mcp import open_session
-from app.publish.notion_rest import RestSession, is_integration_token
+from app.publish.notion_rest import RestSession, is_integration_token, title_properties
 
 
 def test_portal_tokens_are_integration_tokens() -> None:
@@ -33,11 +33,10 @@ async def test_open_session_sends_integration_tokens_to_the_notion_api(
 
 @pytest.mark.asyncio
 async def test_rest_create_omits_parent_at_the_private_root() -> None:
-    captured: dict[str, object] = {}
+    bodies: list[str] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
-        captured["path"] = request.url.path
-        captured["body"] = request.content.decode()
+        bodies.append(request.content.decode())
         return httpx.Response(
             200,
             json={"id": "page-1", "url": "https://notion.so/page-1"},
@@ -56,17 +55,18 @@ async def test_rest_create_omits_parent_at_the_private_root() -> None:
         icon="🧑‍💻",
     )
     assert (page_id, url) == ("page-1", "https://notion.so/page-1")
-    assert str(captured["path"]).endswith("/pages")
-    assert '"workspace": true' in captured["body"] or '"workspace":true' in captured["body"]
-    assert "Developer TIL Dashboard" in str(captured["body"])
+    assert any('"workspace": true' in body or '"workspace":true' in body for body in bodies)
+    assert any("Developer TIL Dashboard" in body for body in bodies)
 
 
 @pytest.mark.asyncio
-async def test_rest_create_sends_title_as_a_page_property_without_injecting_h1() -> None:
-    captured: dict[str, str] = {}
+async def test_rest_create_sends_rich_text_title_and_patches_it_without_h1() -> None:
+    calls: list[tuple[str, str, dict]] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
-        captured["body"] = request.content.decode()
+        calls.append(
+            (request.method, request.url.path, json.loads(request.content.decode() or "{}"))
+        )
         return httpx.Response(200, json={"id": "page-2", "url": "https://notion.so/page-2"})
 
     session = RestSession(
@@ -80,10 +80,15 @@ async def test_rest_create_sends_title_as_a_page_property_without_injecting_h1()
         markdown="본문",
         parent_id="3c216da5-521c-8109-b6c7-e8ca87f0f3c9",
     )
-    payload = json.loads(captured["body"])
-    assert payload["properties"] == {"title": "포트폴리오 2026-08-20"}
-    assert payload["markdown"] == "본문"
-    assert "# 포트폴리오 2026-08-20" not in captured["body"]
+    assert calls[0][0] == "POST"
+    assert calls[0][2]["properties"] == title_properties("포트폴리오 2026-08-20")
+    assert calls[0][2]["markdown"] == "본문"
+    assert calls[1] == (
+        "PATCH",
+        "/v1/pages/page-2",
+        {"properties": title_properties("포트폴리오 2026-08-20")},
+    )
+    assert all("# 포트폴리오 2026-08-20" not in json.dumps(body) for _method, _path, body in calls)
 
 
 @pytest.mark.asyncio
@@ -107,7 +112,7 @@ async def test_rest_update_writes_markdown_and_title_separately() -> None:
 
     assert paths == ["/v1/pages/page-3/markdown", "/v1/pages/page-3"]
     assert bodies[0]["replace_content"]["new_str"] == "본문"
-    assert bodies[1] == {"properties": {"title": "새 제목"}}
+    assert bodies[1] == {"properties": title_properties("새 제목")}
 
 
 @pytest.mark.asyncio
@@ -134,4 +139,4 @@ async def test_rest_create_falls_back_to_page_patch_when_properties_are_rejected
     assert page_id == "page-4"
     assert paths == ["/v1/pages", "/v1/pages", "/v1/pages/page-4"]
     assert "properties" not in bodies[1]
-    assert bodies[2] == {"properties": {"title": "제목"}}
+    assert bodies[2] == {"properties": title_properties("제목")}

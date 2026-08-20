@@ -16,12 +16,13 @@ API_URL = os.environ.get("NOTION_API_URL", "https://api.notion.com/v1")
 NOTION_VERSION = os.environ.get("NOTION_VERSION", "2026-03-11")
 
 _DATE_IN_TITLE = re.compile(r"^(?P<date>\d{4}-\d{2}-\d{2})(?:\s*[·|:/-]\s*(?P<title>.*))?$")
-_DATE_IN_BODY = re.compile(r"(?:\||\*\*)?날짜(?:\||\*\*)?\s*[:|]\s*(\d{4}-\d{2}-\d{2})")
+_DATE_IN_BODY = re.compile(r"날짜[^\d]{0,24}(\d{4}-\d{2}-\d{2})")
 _TAG_KEYS = {"tag", "tags", "태그"}
 # 대시보드가 링크 동작을 보여주려고 만드는 예시 TIL은 날짜가 붙어 있어 그냥 두면
 # 사용자가 하지도 않은 작업이 포트폴리오 근거로 실린다.
 _EXAMPLE_MARK = "[예시]"
 _GENERATED_LOG_PREFIXES = ("프로젝트 ", "포트폴리오 ")
+_TEMPLATE_TITLES = ("일일 Developer TIL 템플릿",)
 
 
 def make_notion_til_collector(
@@ -133,7 +134,7 @@ async def _read_entry(
     if fallback_title and (
         _EXAMPLE_MARK in fallback_title
         or _is_generated_log(fallback_title)
-        or _title_parts(fallback_title, "")[0] is None
+        or fallback_title.strip() in _TEMPLATE_TITLES
     ):
         return None
     page = await _request(client, "GET", f"/pages/{page_id}", headers)

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from datetime import datetime
 
 from app.contracts import (
@@ -116,6 +117,30 @@ def til_field_ref(field: str, til: TilFact, source_field: str) -> EvidenceRef:
 
 def til_field_refs(field: str, til: TilFact, *source_fields: str) -> list[EvidenceRef]:
     return [til_ref(field, til), *[til_field_ref(field, til, source) for source in source_fields]]
+
+
+def work_titles(
+    project: ProjectFacts, field: str, limit: int
+) -> list[tuple[str, EvidenceRef]]:
+    out: list[tuple[str, EvidenceRef]] = []
+    seen: set[str] = set()
+
+    def add(title: str, ref: EvidenceRef) -> None:
+        key = re.sub(r"\s+", " ", title).casefold()
+        if not title or key in seen:
+            return
+        seen.add(key)
+        out.append((title, ref))
+
+    for item in project.highlights:
+        add((item.subject or "").strip(), commit_ref(field, item))
+        if len(out) >= limit:
+            return out
+    for item in [*project.pull_requests, *project.issues]:
+        add((item.title or "").strip(), work_ref(field, item))
+        if len(out) >= limit:
+            return out
+    return out
 
 
 def work_ref(field: str, item: WorkItem) -> EvidenceRef:

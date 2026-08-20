@@ -224,8 +224,8 @@ async def test_grounded_project_lines_keep_description_and_highlights() -> None:
     assert "결제와 알림을 다루는 백엔드를 만들었습니다." in body
     assert "결제 API를 구현했습니다." not in body
     assert "— alpha 서비스" in body
-    assert "- one" not in body and "- two" not in body and "- three" not in body
-    assert "- four" not in body
+    work = body.split("**성과**", 1)[1].split("**성장**", 1)[0]
+    assert "- one" in work and "- two" in work and "- three" in work
     assert "aaaaaaa" not in body
     assert "eeeeeee" not in body
     assert "fffffff" not in body
@@ -259,7 +259,7 @@ async def test_hallucinated_project_ids_fall_back_to_facts() -> None:
     assert "쿠버네티스" not in proposal.body_markdown
     assert "결제 API 기여를 했습니다." not in proposal.body_markdown
     assert "aaaaaaa" not in proposal.body_markdown
-    assert "feat: 알림 발송" not in proposal.body_markdown
+    assert "feat: 알림 발송" in proposal.body_markdown.split("**성과**", 1)[1]
     assert "bbbbbbb" not in proposal.body_markdown
 
 
@@ -438,7 +438,7 @@ async def test_q1_pitch_and_q2_ids_use_original_titles() -> None:
     body = proposal.body_markdown
     assert "결제 서비스를 만들었습니다." in body
     assert "결제 검증을 붙였습니다." not in body
-    assert "- one" not in body
+    assert "- one" in body.split("**성과**", 1)[1]
 
 
 async def test_repo_only_work_ids_fall_back_to_highlights() -> None:
@@ -449,7 +449,7 @@ async def test_repo_only_work_ids_fall_back_to_highlights() -> None:
     )
     proposal = await build_portfolio(llm)
     assert "쿠버네티스" not in proposal.body_markdown
-    assert "feat: 결제 API 구현" not in proposal.body_markdown
+    assert "feat: 결제 API 구현" in proposal.body_markdown.split("**성과**", 1)[1]
 
 
 async def test_one_fill_error_falls_back_that_card() -> None:
@@ -478,7 +478,7 @@ async def test_one_fill_error_falls_back_that_card() -> None:
     proposal = await build_portfolio(llm)
     assert proposal.status == "proposed"
     assert "— alpha 서비스" in proposal.body_markdown
-    assert "feat: 결제 API 구현" not in proposal.body_markdown
+    assert "feat: 결제 API 구현" in proposal.body_markdown.split("**성과**", 1)[1]
 
 
 async def test_unselected_repos_are_not_filled() -> None:
@@ -602,8 +602,10 @@ async def test_portfolio_card_keeps_til_title_not_body() -> None:
     )
     project = four_projects()[0].model_copy(update={"til": [learned]})
     proposal = await build_portfolio(llm=None, projects=[project, *_project_tail()[:2]])
-    assert "캐시 개선" in proposal.body_markdown
-    assert "응답 시간이 줄었다." not in proposal.body_markdown
+    growth = proposal.body_markdown.split("**성장**", 1)[1]
+    assert "캐시 개선" in growth
+    assert "응답 시간이 줄었다." in growth
+    assert "응답 시간이 줄었다." not in proposal.body_markdown.split("**성과**", 1)[1].split("**성장**", 1)[0]
 
 
 async def test_unmatched_til_is_hub_tail_not_portfolio() -> None:

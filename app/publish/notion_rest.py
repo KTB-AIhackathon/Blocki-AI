@@ -22,6 +22,14 @@ def is_integration_token(token: str) -> bool:
     return token.startswith(("ntn_", "secret_"))
 
 
+def title_properties(title: str) -> dict[str, Any]:
+    return {
+        "title": {
+            "title": [{"type": "text", "text": {"content": title.strip()}}]
+        }
+    }
+
+
 class RestSession:
     def __init__(self, client: httpx.AsyncClient) -> None:
         self._client = client
@@ -31,7 +39,7 @@ class RestSession:
     ) -> tuple[str | None, str | None]:
         body: dict[str, Any] = {
             "markdown": markdown or "",
-            "properties": {"title": title.strip()},
+            "properties": title_properties(title),
         }
         if parent_id:
             body["parent"] = {"type": "page_id", "page_id": _page_id(parent_id)}
@@ -49,8 +57,8 @@ class RestSession:
                 "/pages",
                 json={key: value for key, value in body.items() if key != "properties"},
             )
-            if data.get("id"):
-                await self._set_title(data["id"], title)
+        if data.get("id") and title.strip():
+            await self._set_title(data["id"], title)
         return data.get("id"), data.get("url")
 
     async def read_page(self, target: str) -> Any:
@@ -81,7 +89,7 @@ class RestSession:
         await self._request(
             "PATCH",
             f"/pages/{_page_id(page_id)}",
-            json={"properties": {"title": title.strip()}},
+            json={"properties": title_properties(title)},
         )
 
     async def list_root_pages(self) -> list[dict[str, Any]]:

@@ -117,6 +117,27 @@ def test_til_conversion_parses_daily_template_fields_and_field_ids() -> None:
     } <= Evidence(til=[fact]).ids()
 
 
+def test_til_conversion_reads_repository_from_the_daily_table() -> None:
+    snapshot = NotionSnapshot(
+        entries=[
+            TilEntry(
+                date=date(2026, 8, 18),
+                title="캐시 개선",
+                body_markdown=(
+                    "| 항목 | 내용 |\n| --- | --- |\n"
+                    "| 날짜 | 2026-08-18 |\n"
+                    "| Repository | https://github.com/acme/cache |\n"
+                ),
+                page_id="page-table",
+            )
+        ],
+        complete=True,
+    )
+
+    fact = facts_of(snapshot)[0]
+    assert fact.work_repo == "https://github.com/acme/cache"
+
+
 def test_til_conversion_skips_unmeasured_metric() -> None:
     snapshot = NotionSnapshot(
         entries=[

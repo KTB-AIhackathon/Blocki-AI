@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from collections import defaultdict
-
 from app.analyze import skills as skill_analysis
 from app.contracts import Evidence, EvidenceRef, ProjectFacts, SkillFact
 from app.pipelines import common
@@ -54,9 +52,6 @@ def learning(evidence: Evidence) -> Section:
 def _project_block(
     facts: ProjectFacts, number: int, featured: list[str], catalogue: list[SkillFact]
 ) -> Section:
-    facts = facts.model_copy(
-        update={"til": [item for item in facts.til if item.attempt.strip() or item.result.strip()]}
-    )
     refs = [common.project_ref("projects_md", facts)]
     name = _repo_label(facts.repo, featured)
     description = (facts.description or "").strip()
@@ -95,42 +90,26 @@ def _result_text(facts: ProjectFacts) -> str:
             values.append(item.result.strip())
         if item.metric:
             values.append(item.metric.text())
-    return "\n".join(dict.fromkeys(values)) or _fill_text()
+    if values:
+        return "\n".join(dict.fromkeys(values))
+    titles = [title for title, _ref in common.work_titles(facts, "projects_md", MAX_CONTRIBUTIONS)]
+    return "\n".join(titles) or _fill_text()
 
 
 def _contribution_bullets(facts: ProjectFacts) -> list[tuple[str, list[EvidenceRef]]]:
-    if facts.til:
-        attempts: list[tuple[str, list[EvidenceRef]]] = []
-        for item in facts.til:
-            for value in item.attempt.splitlines():
-                if value.strip():
-                    attempts.append(
-                        (value.strip(), common.til_field_refs("projects_md", item, "attempt"))
-                    )
+    attempts: list[tuple[str, list[EvidenceRef]]] = []
+    for item in facts.til:
+        for value in item.attempt.splitlines():
+            if value.strip():
+                attempts.append(
+                    (value.strip(), common.til_field_refs("projects_md", item, "attempt"))
+                )
+    if attempts:
         return attempts[:MAX_CONTRIBUTIONS]
-
-    grouped: dict[str, int] = defaultdict(int)
-    labels = {
-        "feat": "기능 구현",
-        "fix": "버그 수정",
-        "perf": "성능 개선",
-        "refactor": "구조 개선",
-        "test": "테스트 보강",
-        "docs": "문서화",
-        "build": "배포·설정",
-        "other": "기타 작업",
-    }
-    for item in facts.highlights:
-        grouped[item.change_type] += 1
-    refs_by_type = defaultdict(list)
-    for item in facts.highlights:
-        refs_by_type[item.change_type].append(common.commit_ref("projects_md", item))
-    out: list[tuple[str, list[EvidenceRef]]] = []
-    for change_type, count in grouped.items():
-        out.append((f"{labels.get(change_type, '기타 작업')} 관련 작업 {count}건", refs_by_type[change_type]))
-        if len(out) >= MAX_CONTRIBUTIONS:
-            break
-    return out
+    return [
+        (title, [ref])
+        for title, ref in common.work_titles(facts, "projects_md", MAX_CONTRIBUTIONS)
+    ]
 
 
 def _fill_text() -> str:

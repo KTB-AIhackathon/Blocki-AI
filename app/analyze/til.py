@@ -16,6 +16,10 @@ _GROUPS = {
     "learned": ("배운 내용", "기존 이해와 달라진 점"),
 }
 _METRIC_KEYS = {"Before": "before", "After": "after", "단위": "unit", "측정 기준": "criterion"}
+_TABLE_REPO = re.compile(
+    r"\|\s*Repository\s*\|\s*(https?://github\.com/[^\s|]+)",
+    re.IGNORECASE,
+)
 
 
 def facts_of(snapshot: NotionSnapshot) -> list[TilFact]:
@@ -38,7 +42,7 @@ def _fact_of(entry) -> TilFact:
         metric=_metric(values),
         learned=_group(values, "learned"),
         retro=_first(values, "자유롭게 작성"),
-        work_repo=_first(values, "Repository"),
+        work_repo=_first(values, "Repository") or _table_repo(entry.body_markdown),
     )
 
 
@@ -66,6 +70,11 @@ def _group(values: dict[str, list[str]], field: str) -> str:
         for value in values.get(key, [])
         if value
     )
+
+
+def _table_repo(body: str) -> str:
+    match = _TABLE_REPO.search(body)
+    return match.group(1).strip() if match else ""
 
 
 def _metric(values: dict[str, list[str]]) -> MetricFact | None:
