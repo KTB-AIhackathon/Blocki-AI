@@ -8,7 +8,6 @@ from app.analyze import skills as skill_analysis
 from app.contracts import Evidence, EvidenceRef, ProjectFacts, SkillFact
 from app.llm.guard import GroundedText
 from app.pipelines import common
-from app.pipelines.portfolio.briefs import til_excerpt
 from app.pipelines.portfolio.team import Dossier
 
 Section = tuple[str, list[EvidenceRef]]
@@ -132,13 +131,8 @@ def _project_block(
                 parts.append(f"- {metric}")
                 refs.extend(common.til_field_refs("projects_md", item, "metric"))
     else:
-        fallback = common.work_titles(facts, "projects_md", MAX_ACHIEVEMENTS)
-        if fallback:
-            for title, ref in fallback:
-                parts.append(f"- {title}")
-                refs.append(ref)
-        else:
-            parts.append(f"- {_fill_text()}")
+        # 커밋 제목은 성과가 아니다. TIL 이 없으면 사용자가 직접 채운다.
+        parts.append(f"- {_fill_text()}")
 
     parts.extend(["", "**성장**"])
     growth = _til_values(facts, "learned", MAX_GROWTH) + _til_values(facts, "retro", MAX_GROWTH)
@@ -154,7 +148,6 @@ def _project_block(
                 continue
             parts.append(f"- {item.date:%Y-%m-%d} · {title}")
             refs.append(common.til_ref("projects_md", item))
-            parts.extend(f"  - {line}" for line in til_excerpt(item.body_markdown))
             added = True
         if not added:
             parts.append(f"- {_fill_text()}")
@@ -166,16 +159,19 @@ def _project_block(
 def _til_values(
     facts: ProjectFacts, field: str, limit: int
 ) -> list[tuple[str, object, str]]:
+    """TIL 한 건에서 한 줄만. 한 기록의 여러 줄이 상한을 다 먹으면 나머지 기록이
+    통째로 사라진다."""
     values: list[tuple[str, object, str]] = []
+    seen: set[str] = set()
     for item in facts.til:
-        text = getattr(item, field).strip()
-        if not text:
+        lines = [line.strip() for line in getattr(item, field).strip().splitlines()]
+        value = next((line for line in lines if line), "")
+        if not value or value.casefold() in seen:
             continue
-        for value in text.splitlines():
-            if value.strip():
-                values.append((value.strip(), item, field))
-                if len(values) >= limit:
-                    return values
+        seen.add(value.casefold())
+        values.append((value, item, field))
+        if len(values) >= limit:
+            break
     return values
 
 

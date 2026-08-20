@@ -172,7 +172,40 @@ async def test_resume_uses_profile_readme_sections_as_confirmable_drafts() -> No
 
 
 @pytest.mark.asyncio
-async def test_empty_structured_slots_fall_back_to_github_titles_and_til_titles() -> None:
+async def test_resume_takes_one_line_per_til_and_caps_each_slot() -> None:
+    """`문제` 는 「문제 또는 목표」·「문제」·「원인」을 합친 값이다. 상한과 한 줄
+    제한이 없으면 기록 네 건이 한 항목에 열두 줄로 눌려 들어간다."""
+    til = [
+        TilFact(
+            id=f"til:{index}",
+            date=date(2026, 8, index + 1),
+            title=f"{index}일차",
+            body_markdown="",
+            page_id=f"p{index}",
+            problem=f"대표 문제 {index}\n곁가지 원인 {index}\n더 깊은 원인 {index}",
+            result=f"대표 결과 {index}\n곁가지 결과 {index}",
+        )
+        for index in range(4)
+    ]
+    resume = await build_resume(
+        _job("resume"),
+        GitHubSnapshot(collected_at=NOW, complete=True, snapshot_digest="g" * 64),
+        _evidence([_project("acme/cache", til)]),
+    )
+
+    card = resume.body_markdown.split("## 주요 작업", 1)[1]
+    problems = card.split("- **문제**", 1)[1].split("- **목표**", 1)[0]
+    results = card.split("- **성과**", 1)[1]
+
+    assert all(f"대표 문제 {index}" in problems for index in range(3))
+    assert "대표 문제 3" not in problems
+    assert "곁가지 원인 0" not in problems
+    assert "곁가지 결과 0" not in results
+    assert results.count("대표 결과") == 4
+
+
+@pytest.mark.asyncio
+async def test_empty_structured_slots_are_left_for_the_user_not_filled_from_commits() -> None:
     learned = TilFact(
         id="til:cache",
         date=date(2026, 8, 20),
@@ -228,9 +261,12 @@ async def test_empty_structured_slots_fall_back_to_github_titles_and_til_titles(
     cache_card = folio_cards.split("### 1.", 1)[1].split("### 2.", 1)[0]
     empty_card = folio_cards.split("### 2.", 1)[1].split("### 3.", 1)[0]
     assert "캐시 개선" in cache_card.split("**성장**", 1)[1]
-    assert "응답 시간이 줄었다." in cache_card
-    assert "feat: 결제 API 구현" in empty_card.split("**성과**", 1)[1]
-    assert "feat: 결제 API 구현" in resume.body_markdown.split("**성과**", 1)[1]
+    # TIL 제목까지만. 본문도, 커밋 제목도 문서에 옮기지 않는다.
+    assert "응답 시간이 줄었다." not in folio.body_markdown
+    assert "feat: 결제 API 구현" not in folio.body_markdown
+    assert "아직 비어 있습니다" in empty_card.split("**성과**", 1)[1]
+    assert "feat: 결제 API 구현" not in resume.body_markdown
+    assert "아직 비어 있습니다" in resume.body_markdown.split("**성과**", 1)[1]
 
 
 def _card_blocks(section: str) -> list[str]:

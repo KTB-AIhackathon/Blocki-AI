@@ -67,7 +67,9 @@ async def test_document_pipeline_renders_grounded_sections(job_type: str) -> Non
         assert "Python" in body and "FastAPI" in body
     else:
         assert common.FILL_IN in body
-    assert "결제 API 구현" in body
+    # 커밋 제목은 문서에 싣지 않는다. 근거 참조로만 남는다.
+    assert "결제 API 구현" not in body
+    assert "demo" in body
     assert "aaaaaaa" not in body
     assert "pyproject.toml" not in body
     assert PAT not in body

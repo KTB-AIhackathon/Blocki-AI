@@ -190,6 +190,32 @@ def test_highlights_prefer_features_over_chores() -> None:
     assert facts.highlights[0].subject == "결제 API 구현"
 
 
+def test_the_profile_readme_repo_is_not_a_project() -> None:
+    """`owner/owner` 는 깃허브 프로필 자기소개다. 커밋이 많아도 후보에 들면 안 된다."""
+    profile = a_repo("acme", commits=[a_commit(f"{i:012d}", f"feat: {i}", days=1) for i in range(30)])
+    evidence = analyze(snapshot(a_repo("real"), profile), now=NOW)
+
+    assert [p.repo for p in evidence.projects] == ["acme/real"]
+    assert "acme/acme" not in [p.repo for p in evidence.selection_candidates]
+
+
+def test_readme_and_document_commits_are_not_contribution_evidence() -> None:
+    """문서 커밋은 기여 근거가 아니다. 파일 이름만 바뀐 커밋도 마찬가지다."""
+    repo = a_repo(
+        commits=[
+            a_commit("a" * 12, "Update README.md", days=1),
+            a_commit("b" * 12, "Update 00_대회규정.md", days=2),
+            a_commit("c" * 12, "docs: 주석 보강", days=3),
+            a_commit("d" * 12, "feat: 결제 API 구현", days=4),
+        ]
+    )
+    facts = projects.facts_of(repo, ALICE, now=NOW)
+
+    assert [h.subject for h in facts.highlights] == ["결제 API 구현"]
+    # 개수는 사실이라 그대로 센다. 빼는 것은 내용뿐이다.
+    assert facts.my_commits == 4
+
+
 def test_forks_and_archived_repos_are_excluded() -> None:
     evidence = analyze(
         snapshot(a_repo("real"), a_repo("forked", fork=True), a_repo("old", archived=True)),

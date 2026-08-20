@@ -9,6 +9,11 @@ from app.pipelines import common
 Section = tuple[str, list[EvidenceRef]]
 MAX_CARDS = 4
 MAX_CONTRIBUTIONS = 4
+# 한 항목에 들어갈 줄 수 상한. TIL 한 건의 `문제` 는 「문제 또는 목표」·「문제」·「원인」
+# 세 키를 합친 것이라, 기록이 세 건이면 상한 없이 아홉 줄이 한 줄에 눌려 들어간다.
+MAX_PROBLEMS = 3
+MAX_GOALS = 3
+MAX_RESULTS = 4
 
 
 def summary(evidence: Evidence, lines: list[str] | None = None) -> Section:
@@ -58,12 +63,17 @@ def _project_block(
     heading = f"### {number}. {name}"
     if description:
         heading += f" — {description}"
-    lines = [heading, "", f"- **문제**: {_til_text(facts, 'problem')}", f"- **목표**: {_til_text(facts, 'goal')}"]
+    lines = [heading, ""]
+    lines.extend(_labelled("문제", _til_lines(facts, "problem", MAX_PROBLEMS)))
+    lines.extend(_labelled("목표", _til_lines(facts, "goal", MAX_GOALS)))
     lines.append(f"- **기여**: {common.contribution(facts)}")
-    for bullet, bullet_refs in _contribution_bullets(facts):
+    bullets = _contribution_bullets(facts)
+    for bullet, bullet_refs in bullets:
         lines.append(f"  - {bullet}")
         refs.extend(bullet_refs)
-    lines.append(f"- **성과**: {_result_text(facts)}")
+    if not bullets:
+        lines.append(f"  - {_fill_text()}")
+    lines.extend(_labelled("성과", _result_lines(facts)))
 
     stack = [skill for skill in catalogue if facts.repo in skill.repos]
     refs.extend(
@@ -78,22 +88,30 @@ def _project_block(
     return "\n".join(lines), refs
 
 
-def _til_text(facts: ProjectFacts, field: str) -> str:
-    values = [getattr(item, field).strip() for item in facts.til if getattr(item, field).strip()]
-    return "\n".join(dict.fromkeys(value for value in values if value)) or _fill_text()
+def _labelled(label: str, values: list[str]) -> list[str]:
+    """첫 값은 라벨 옆에, 나머지는 하위 불릿으로. 한 줄에 몰아 넣으면 Notion 이
+    통짜 문단으로 렌더링해 읽을 수 없게 된다."""
+    if not values:
+        return [f"- **{label}**: {_fill_text()}"]
+    return [f"- **{label}**: {values[0]}", *(f"  - {value}" for value in values[1:])]
 
 
-def _result_text(facts: ProjectFacts) -> str:
+def _til_lines(facts: ProjectFacts, field: str, limit: int) -> list[str]:
+    """TIL 한 건에서 한 줄만 뽑는다. 첫 줄이 그 기록의 대표 문장이다."""
+    return _capped(
+        (getattr(item, field).strip().splitlines() or [""])[0] for item in facts.til
+    )[:limit]
+
+
+def _result_lines(facts: ProjectFacts) -> list[str]:
+    """결과 한 줄과 측정값. 커밋 제목으로는 절대 채우지 않는다 — 기록이 없으면 빈 칸이다."""
     values: list[str] = []
     for item in facts.til:
         if item.result.strip():
-            values.append(item.result.strip())
+            values.append(item.result.strip().splitlines()[0])
         if item.metric:
             values.append(item.metric.text())
-    if values:
-        return "\n".join(dict.fromkeys(values))
-    titles = [title for title, _ref in common.work_titles(facts, "projects_md", MAX_CONTRIBUTIONS)]
-    return "\n".join(titles) or _fill_text()
+    return _capped(values)[:MAX_RESULTS]
 
 
 def _contribution_bullets(facts: ProjectFacts) -> list[tuple[str, list[EvidenceRef]]]:
@@ -104,12 +122,11 @@ def _contribution_bullets(facts: ProjectFacts) -> list[tuple[str, list[EvidenceR
                 attempts.append(
                     (value.strip(), common.til_field_refs("projects_md", item, "attempt"))
                 )
-    if attempts:
-        return attempts[:MAX_CONTRIBUTIONS]
-    return [
-        (title, [ref])
-        for title, ref in common.work_titles(facts, "projects_md", MAX_CONTRIBUTIONS)
-    ]
+    return attempts[:MAX_CONTRIBUTIONS]
+
+
+def _capped(values) -> list[str]:
+    return list(dict.fromkeys(value.strip() for value in values if value.strip()))
 
 
 def _fill_text() -> str:

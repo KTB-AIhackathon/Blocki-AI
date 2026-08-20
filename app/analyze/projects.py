@@ -44,7 +44,9 @@ _KEYWORDS: tuple[tuple[ChangeType, tuple[str, ...]], ...] = (
     ("perf", ("성능", "최적화", "optimiz", "perf", "speed", "캐시", "cache")),
     ("refactor", ("리팩", "구조 개선", "refactor", "cleanup", "정리")),
     ("test", ("테스트", "test", "spec")),
-    ("docs", ("문서", "readme", "docs", "주석")),
+    # `.md` 까지 문서로 본다. "Update 00_대회규정.md" 처럼 파일 이름만 바뀐 커밋이
+    # 기여로 실리던 것을 막는다.
+    ("docs", ("문서", "readme", "docs", "주석", ".md", "license", "changelog")),
     ("build", ("배포", "빌드", "deploy", "docker", "ci", "설정")),
     ("feat", ("추가", "구현", "신규", "개발", "add", "implement", "support", "introduce")),
 )
@@ -181,7 +183,9 @@ def _highlights(repo: str, commits: list[CommitSummary], limit: int) -> list[Com
     seen: set[str] = set()
     for commit in commits:
         subject, change_type = classify(commit.message)
-        if not subject:
+        # README 와 문서 커밋은 근거로 쓰지 않는다. 어느 문서에도, LLM 프롬프트에도
+        # 들어가면 안 되므로 여기서 한 번만 걸러 낸다.
+        if not subject or change_type == "docs":
             continue
         key = subject.casefold()
         if key in seen:

@@ -198,7 +198,7 @@ async def test_colliding_repo_names_use_full_path() -> None:
     assert "### foo/alpha" not in proposal.body_markdown
 
 
-async def test_grounded_project_lines_keep_description_and_highlights() -> None:
+async def test_grounded_project_lines_keep_description_and_commit_refs() -> None:
     repo = "acme/alpha"
     alpha = _project(
         "alpha",
@@ -225,7 +225,9 @@ async def test_grounded_project_lines_keep_description_and_highlights() -> None:
     assert "결제 API를 구현했습니다." not in body
     assert "— alpha 서비스" in body
     work = body.split("**성과**", 1)[1].split("**성장**", 1)[0]
-    assert "- one" in work and "- two" in work and "- three" in work
+    # 커밋 제목은 성과가 아니다. TIL 이 없으면 사용자가 채울 빈 칸으로 남는다.
+    assert "아직 비어 있습니다" in work
+    assert "- one" not in work and "- two" not in work
     assert "aaaaaaa" not in body
     assert "eeeeeee" not in body
     assert "fffffff" not in body
@@ -259,7 +261,8 @@ async def test_hallucinated_project_ids_fall_back_to_facts() -> None:
     assert "쿠버네티스" not in proposal.body_markdown
     assert "결제 API 기여를 했습니다." not in proposal.body_markdown
     assert "aaaaaaa" not in proposal.body_markdown
-    assert "feat: 알림 발송" in proposal.body_markdown.split("**성과**", 1)[1]
+    assert "feat: 알림 발송" not in proposal.body_markdown
+    assert "아직 비어 있습니다" in proposal.body_markdown.split("**성과**", 1)[1]
     assert "bbbbbbb" not in proposal.body_markdown
 
 
@@ -438,10 +441,11 @@ async def test_q1_pitch_and_q2_ids_use_original_titles() -> None:
     body = proposal.body_markdown
     assert "결제 서비스를 만들었습니다." in body
     assert "결제 검증을 붙였습니다." not in body
-    assert "- one" in body.split("**성과**", 1)[1]
+    assert "- one" not in body
+    assert "아직 비어 있습니다" in body.split("**성과**", 1)[1]
 
 
-async def test_repo_only_work_ids_fall_back_to_highlights() -> None:
+async def test_repo_only_work_ids_never_put_commit_titles_in_achievements() -> None:
     llm = _slot_llm(
         selected=["repo:acme/alpha", "repo:acme/beta", "repo:acme/gamma"],
         works=[{"work_ids": ["repo:acme/alpha"]}],
@@ -449,7 +453,8 @@ async def test_repo_only_work_ids_fall_back_to_highlights() -> None:
     )
     proposal = await build_portfolio(llm)
     assert "쿠버네티스" not in proposal.body_markdown
-    assert "feat: 결제 API 구현" in proposal.body_markdown.split("**성과**", 1)[1]
+    assert "feat: 결제 API 구현" not in proposal.body_markdown
+    assert "아직 비어 있습니다" in proposal.body_markdown.split("**성과**", 1)[1]
 
 
 async def test_one_fill_error_falls_back_that_card() -> None:
@@ -478,7 +483,8 @@ async def test_one_fill_error_falls_back_that_card() -> None:
     proposal = await build_portfolio(llm)
     assert proposal.status == "proposed"
     assert "— alpha 서비스" in proposal.body_markdown
-    assert "feat: 결제 API 구현" in proposal.body_markdown.split("**성과**", 1)[1]
+    assert "feat: 결제 API 구현" not in proposal.body_markdown
+    assert "아직 비어 있습니다" in proposal.body_markdown.split("**성과**", 1)[1]
 
 
 async def test_unselected_repos_are_not_filled() -> None:
@@ -604,8 +610,8 @@ async def test_portfolio_card_keeps_til_title_not_body() -> None:
     proposal = await build_portfolio(llm=None, projects=[project, *_project_tail()[:2]])
     growth = proposal.body_markdown.split("**성장**", 1)[1]
     assert "캐시 개선" in growth
-    assert "응답 시간이 줄었다." in growth
-    assert "응답 시간이 줄었다." not in proposal.body_markdown.split("**성과**", 1)[1].split("**성장**", 1)[0]
+    # 본문은 어느 칸에도 옮기지 않는다. 제목만 근거로 남긴다.
+    assert "응답 시간이 줄었다." not in proposal.body_markdown
 
 
 async def test_unmatched_til_is_hub_tail_not_portfolio() -> None:

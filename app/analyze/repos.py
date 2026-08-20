@@ -29,6 +29,10 @@ def eligible(repo: RepoActivity) -> bool:
     """Forks and archived repositories are not evidence of authored work."""
     if repo.full_name.casefold() in excluded_repos():
         return False
+    # `owner/owner` 는 깃허브 프로필 상단에 띄우는 README 저장소다. 커밋이 아무리
+    # 많아도 프로젝트가 아니라 자기소개라, 감점이 아니라 후보에서 빼야 한다.
+    if repo.name.casefold() == repo.owner.casefold():
+        return False
     return not repo.fork and not repo.archived
 
 
@@ -55,7 +59,7 @@ def _score_breakdown(facts: ProjectFacts, repo: RepoActivity, *, now: datetime) 
         breakdown["duration"] = max((facts.ended_at - facts.started_at).days, 0) / 30.0
 
     name = repo.name.casefold()
-    if name == repo.owner.casefold() or any(
+    if any(
         part in _NON_PROJECT_PARTS for part in re.split(r"[^a-z0-9]+", name) if part
     ) or name.endswith("-log"):
         breakdown["penalty"] = -10.0

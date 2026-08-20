@@ -46,7 +46,7 @@ def analyze(
     )
     unmatched_til = join.attach(selected, til_facts) if til is not None else []
     if excluded:
-        warnings.append(f"fork/archived 제외: {', '.join(sorted(excluded))}")
+        warnings.append(f"fork/archived/프로필 저장소 제외: {', '.join(sorted(excluded))}")
     if viewer.login is None and any(f.total_commits for f in facts):
         warnings.append("GitHub 사용자 식별 실패로 본인 커밋을 구분하지 못했습니다")
 
