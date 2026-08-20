@@ -16,6 +16,7 @@ from fastapi.testclient import TestClient
 
 from app.contracts import CollectPolicy
 from app.main import create_app
+from app.publish.notion_template import ARCHIVE_TITLE
 from tests.conftest import NOTION_TOKEN, PAT, FakeGitHub, commit, repo_meta
 from tests.notion_double import LIVE_CREATE_PAGES, NotionWorkspace, mcp_session
 
@@ -138,12 +139,14 @@ def test_portfolio_flows_from_github_to_spring_and_notion(
     assert "## 프로젝트" in markdown
     assert "https://github.com/acme/demo" in markdown
 
-    page = next(item for item in notion.logs if item["title"] == "홍길동 포트폴리오 2026-08-20")
-    hub = next(item for item in notion.logs if item["title"] == "프로젝트 2026-08-20")
+    page = next(item for item in notion.logs if item["title"] == "홍길동 포트폴리오 v1 2026-08-20")
+    hub = next(item for item in notion.logs if item["title"] == "프로젝트 v1 2026-08-20")
     assert body["notion"]["ok"] is True
     assert body["notion"]["page_id"] == page["id"]
-    assert page["parent_id"] == DASHBOARD_ID
-    assert hub["parent_id"] == DASHBOARD_ID
+    # 대시보드 직속이 아니라 그 아래 보관 페이지로 들어간다.
+    assert page["parent_id"] == notion.archive_id
+    assert hub["parent_id"] == notion.archive_id
+    assert notion.titles_under(DASHBOARD_ID) == [ARCHIVE_TITLE]
     assert page["markdown"] == markdown, "Spring preview is the portfolio page, not the briefs"
     assert notion.titles_under(hub["id"])
     assert all(
@@ -183,8 +186,8 @@ def test_portfolio_needs_no_career_fields(
         document={"kind": "portfolio", "profile_fields": {"name": "홍길동"}},
     )
     assert body["ok"] is True
-    assert any(page["title"] == "홍길동 포트폴리오 2026-08-20" for page in notion.logs)
-    assert any(page["title"] == "프로젝트 2026-08-20" for page in notion.logs)
+    assert any(page["title"] == "홍길동 포트폴리오 v1 2026-08-20" for page in notion.logs)
+    assert any(page["title"] == "프로젝트 v1 2026-08-20" for page in notion.logs)
 
 
 # --------------------------------------------------------------------------
@@ -203,7 +206,7 @@ def test_resume_flows_from_github_to_spring_and_notion(
     assert "2025 ~ : 백엔드 엔지니어" in markdown
     assert "컴퓨터공학" in markdown
 
-    assert notion.logs[0]["title"] == "홍길동 이력서 2026-08-20"
+    assert notion.logs[0]["title"] == "홍길동 이력서 v1 2026-08-20"
     assert notion.logs[0]["markdown"] == markdown
 
 
@@ -256,9 +259,9 @@ def test_portfolio_and_resume_are_different_documents_from_one_snapshot(
     assert "홍길동" not in two and "## 주요 작업" in two
     assert "## 프로젝트" not in two and "## 주요 작업" not in one
     titles = [page["title"] for page in notion.logs]
-    assert "홍길동 포트폴리오 2026-08-20" in titles
-    assert "프로젝트 2026-08-20" in titles
-    assert titles[-1] == "홍길동 이력서 2026-08-20"
+    assert "홍길동 포트폴리오 v1 2026-08-20" in titles
+    assert "프로젝트 v1 2026-08-20" in titles
+    assert titles[-1] == "홍길동 이력서 v1 2026-08-20"
 
 
 # --------------------------------------------------------------------------
@@ -363,7 +366,7 @@ def test_every_pipeline_sends_spring_and_notion_the_same_document(
     assert result["notion"]["ok"] is True
     page = next(item for item in notion.pages if item["id"] == result["notion"]["page_id"])
     assert page["markdown"] == result["artifact"]["body_markdown"]
-    assert page["parent_id"] == DASHBOARD_ID
+    assert page["parent_id"] == notion.archive_id
 
 
 def test_a_notion_outage_still_delivers_the_document_to_spring(

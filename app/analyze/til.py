@@ -29,6 +29,10 @@ _TABLE_REPO = re.compile(
 # 기본 정보 표의 프로젝트 행. 저장소 URL 이 비거나 다른 저장소를 가리켜도 이 이름이
 # 저장소 설명과 겹치면 붙는다. 사용자는 여기에 서비스 이름을 적지 저장소 경로를 적지 않는다.
 _TABLE_PROJECT = re.compile(r"\|\s*프로젝트\s*\|\s*([^|]+?)\s*\|")
+# 한 블록 안에서 shift+enter 로 나눈 줄을 노션 `/markdown` 은 `<br>` 로 내보낸다.
+# 그대로 두면 키 하나가 아래 항목들을 통째로 삼키고, 노션 밖(웹 뷰어)에서는
+# 태그가 글자로 보인다.
+_BR = re.compile(r"<br\s*/?>", re.IGNORECASE)
 
 
 def facts_of(snapshot: NotionSnapshot) -> list[TilFact]:
@@ -36,12 +40,13 @@ def facts_of(snapshot: NotionSnapshot) -> list[TilFact]:
 
 
 def _fact_of(entry) -> TilFact:
-    values = _values(entry.body_markdown)
+    body = _BR.sub("\n", entry.body_markdown or "")
+    values = _values(body)
     return TilFact(
         id=f"til:{entry.page_id}",
         date=entry.date,
         title=entry.title,
-        body_markdown=entry.body_markdown,
+        body_markdown=body,
         page_id=entry.page_id,
         tags=list(entry.tags),
         goal=_first(values, "오늘의 목표"),
@@ -51,8 +56,8 @@ def _fact_of(entry) -> TilFact:
         metric=_metric(values),
         learned=_group(values, "learned"),
         retro=_first(values, "자유롭게 작성"),
-        work_repo=_first(values, "Repository") or _table_repo(entry.body_markdown),
-        project_name=_first(values, "프로젝트") or _table_project(entry.body_markdown),
+        work_repo=_first(values, "Repository") or _table_repo(body),
+        project_name=_first(values, "프로젝트") or _table_project(body),
     )
 
 

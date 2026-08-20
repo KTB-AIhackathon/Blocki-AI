@@ -11,12 +11,14 @@ dashboard. Workspace-wide search is not used: it walks pages we do not own.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from typing import Any
 
 from app.publish.notion_mcp import NotionSession
 from app.publish.notion_schema import children_from, title_of
 from app.publish.notion_template import (
+    ARCHIVE_PAGE,
     CHILD_PAGES,
     DASHBOARD_ICON,
     DASHBOARD_TITLE,
@@ -27,11 +29,17 @@ from app.publish.notion_template import (
 __all__ = [
     "DashboardRef",
     "OutsideDashboard",
+    "child_titles",
+    "ensure_archive",
     "ensure_dashboard",
     "find_child",
     "guard_parent",
+    "next_version",
     "upsert_child",
 ]
+
+#: `이름 종류 v3 2026-08-20` 의 버전 자리.
+_VERSION = re.compile(r"^\s+v(\d+)\b")
 
 
 class OutsideDashboard(RuntimeError):
@@ -84,13 +92,36 @@ async def guard_parent(session: NotionSession, parent_id: str | None) -> str:
     return target
 
 
+async def ensure_archive(session: NotionSession, dashboard_id: str) -> str:
+    """The page generated documents go under, created only when it is missing.
+
+    Deliberately not `upsert_child`: replacing the body of a page that already
+    holds documents is how you lose them. When creation gives us no id the
+    caller still gets the dashboard, so the write lands one level too high
+    rather than not at all.
+    """
+    existing = await find_child(
+        session, parent_id=dashboard_id, title=ARCHIVE_PAGE.title
+    )
+    if existing is not None:
+        return str(existing["id"])
+    page_id, _ = await session.create_page(
+        title=ARCHIVE_PAGE.title,
+        markdown=ARCHIVE_PAGE.body,
+        parent_id=dashboard_id,
+        icon=ARCHIVE_PAGE.icon,
+    )
+    return page_id or dashboard_id
+
+
 async def upsert_child(
     session: NotionSession, *, parent_id: str, title: str, markdown: str
 ) -> tuple[str | None, str | None, bool]:
-    """Write `title` under the dashboard, replacing the body if it already exists.
+    """Write `title` under `parent_id`, replacing the body if it already exists.
 
-    Returns `(page_id, page_url, created)`. Re-running a job on the same day
-    therefore refreshes one page instead of stacking near-duplicates.
+    Returns `(page_id, page_url, created)`. Generated documents carry a version
+    in their title, so they never collide here; the per-project briefs under one
+    hub do, and re-running that hub refreshes them instead of duplicating them.
     """
     existing = await find_child(session, parent_id=parent_id, title=title)
     if existing is not None:
@@ -100,6 +131,31 @@ async def upsert_child(
         title=title, markdown=markdown, parent_id=parent_id
     )
     return page_id, page_url, True
+
+
+async def child_titles(session: NotionSession, parent_id: str) -> list[str]:
+    """`parent_id` 바로 아래 페이지 제목들. 읽지 못하면 빈 목록을 준다."""
+    try:
+        fetched = await session.read_page(parent_id)
+    except Exception:
+        return []
+    return [str(child.get("title") or "") for child in children_from(fetched)]
+
+
+def next_version(titles: list[str], base: str) -> int:
+    """`base v<n> …` 중 가장 큰 n 의 다음 번호.
+
+    개수를 세지 않는다. 사용자가 중간 버전을 지우면 개수가 뒤로 밀려, 아직
+    남아 있는 페이지 제목과 부딪히고 그 페이지를 덮어쓴다.
+    """
+    highest = 0
+    for title in titles:
+        if not title.startswith(base):
+            continue
+        match = _VERSION.match(title[len(base):])
+        if match:
+            highest = max(highest, int(match.group(1)))
+    return highest + 1
 
 
 async def find_child(

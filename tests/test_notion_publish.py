@@ -6,6 +6,7 @@ from types import SimpleNamespace
 from app.contracts import ArtifactPayload, NotionTarget
 from app.publish import notion
 from app.publish.notion_mcp import McpSession
+from app.publish.notion_template import ARCHIVE_TITLE
 from tests.conftest import NOTION_TOKEN
 from tests.notion_double import LIVE_CREATE_PAGES, NotionWorkspace, mcp_session
 
@@ -47,8 +48,10 @@ async def test_publishes_with_a_date_stamped_title() -> None:
 
     assert result.ok is True
     assert result.page_id == fake.logs[0]["id"]
-    assert fake.logs[0]["title"] == "이력서 2026-08-20"
-    assert fake.logs[0]["parent_id"] == fake.parent
+    assert fake.logs[0]["title"] == "이력서 v1 2026-08-20"
+    # 대시보드에는 보관 페이지만, 문서는 그 아래에.
+    assert fake.titles_under(fake.parent) == [ARCHIVE_TITLE]
+    assert fake.logs[0]["parent_id"] == fake.archive_id
 
 
 async def test_explicit_title_wins_over_the_date_stamp() -> None:
@@ -78,7 +81,8 @@ async def test_a_parent_outside_the_dashboard_is_skipped_not_written() -> None:
     assert fake.titles_under(elsewhere) == []
 
 
-async def test_a_second_run_on_the_same_day_updates_one_page() -> None:
+async def test_a_second_run_on_the_same_day_stacks_a_new_version() -> None:
+    """웹 아카이브가 판마다 한 줄씩 남기므로 Notion 도 덮어쓰지 않고 쌓는다."""
     fake = FakeSession()
     target = fake.target(log_date=date(2026, 8, 20))
 
@@ -89,9 +93,35 @@ async def test_a_second_run_on_the_same_day_updates_one_page() -> None:
         artifact(body="# 두번째 판"), notion_token=NOTION_TOKEN, target=target, session=fake
     )
 
-    assert first.page_id == second.page_id
-    assert fake.titles_under(fake.parent) == ["이력서 2026-08-20"]
+    assert first.page_id != second.page_id
+    assert fake.titles_under(fake.archive_id) == [
+        "이력서 v1 2026-08-20",
+        "이력서 v2 2026-08-20",
+    ]
+    assert fake.body_of(first.page_id) == "# 첫 판"
     assert fake.body_of(second.page_id) == "# 두번째 판"
+
+
+async def test_a_deleted_middle_version_does_not_overwrite_a_later_one() -> None:
+    """개수를 세면 v2 를 지웠을 때 다음 판이 v2 가 되어 v3 을 덮어쓴다."""
+    fake = FakeSession()
+    target = fake.target(log_date=date(2026, 8, 20))
+    for _ in range(3):
+        await notion.publish_artifact(
+            artifact(), notion_token=NOTION_TOKEN, target=target, session=fake
+        )
+    stale = next(page for page in fake.logs if page["title"] == "이력서 v2 2026-08-20")
+    fake.pages.remove(stale)
+
+    await notion.publish_artifact(
+        artifact(body="# 네번째 판"), notion_token=NOTION_TOKEN, target=target, session=fake
+    )
+
+    assert fake.titles_under(fake.archive_id) == [
+        "이력서 v1 2026-08-20",
+        "이력서 v3 2026-08-20",
+        "이력서 v4 2026-08-20",
+    ]
 
 
 async def test_the_log_date_defaults_to_kst_not_the_server_clock() -> None:
@@ -193,8 +223,8 @@ async def test_portfolio_publish_writes_hub_children_and_keeps_page_id_on_the_do
         publish_warnings=warnings,
     )
 
-    folio = next(page for page in fake.logs if page["title"] == "포트폴리오 2026-08-20")
-    hub = next(page for page in fake.logs if page["title"] == "프로젝트 2026-08-20")
+    folio = next(page for page in fake.logs if page["title"] == "포트폴리오 v1 2026-08-20")
+    hub = next(page for page in fake.logs if page["title"] == "프로젝트 v1 2026-08-20")
     assert result.ok is True
     assert result.page_id == folio["id"]
     assert fake.titles_under(hub["id"]) == ["demo"]
@@ -218,7 +248,7 @@ async def test_portfolio_hub_index_appends_unmatched_learning() -> None:
         briefs=[{"title": "demo", "markdown": "# demo\n"}],
         hub_tail="## 그 외 학습\n- 2026-08-01 · 혼자 있는 기록\n",
     )
-    hub = next(page for page in fake.logs if page["title"] == "프로젝트 2026-08-20")
+    hub = next(page for page in fake.logs if page["title"] == "프로젝트 v1 2026-08-20")
     body = fake.body_of(hub["id"]) or ""
     assert result.ok is True
     assert "## 그 외 학습" in body
@@ -227,7 +257,7 @@ async def test_portfolio_hub_index_appends_unmatched_learning() -> None:
     assert fake.titles_under(hub["id"]) == ["demo"]
 
 
-async def test_portfolio_publish_rerun_updates_same_hub_and_child() -> None:
+async def test_portfolio_publish_rerun_stacks_a_new_version_with_its_own_hub() -> None:
     fake = FakeSession()
     target = fake.target(log_date=date(2026, 8, 20))
     payload = ArtifactPayload(
@@ -247,12 +277,21 @@ async def test_portfolio_publish_rerun_updates_same_hub_and_child() -> None:
         session=fake,
         briefs=[{"title": "demo", "markdown": "# 둘째 정리\n"}],
     )
-    hub = next(page for page in fake.logs if page["title"] == "프로젝트 2026-08-20")
-    assert first.page_id == second.page_id
-    assert fake.titles_under(fake.parent).count("프로젝트 2026-08-20") == 1
-    assert fake.titles_under(hub["id"]) == ["demo"]
-    child_id = next(page["id"] for page in fake.pages if page["title"] == "demo")
-    assert fake.body_of(child_id) == "# 둘째 정리\n"
+    assert first.page_id != second.page_id
+    # 판마다 문서와 허브가 짝을 이룬다. 이전 판의 정리도 그대로 남는다.
+    assert fake.titles_under(fake.archive_id) == [
+        "프로젝트 v1 2026-08-20",
+        "포트폴리오 v1 2026-08-20",
+        "프로젝트 v2 2026-08-20",
+        "포트폴리오 v2 2026-08-20",
+    ]
+    bodies = []
+    for version in ("v1", "v2"):
+        hub = next(page for page in fake.logs if page["title"] == f"프로젝트 {version} 2026-08-20")
+        assert fake.titles_under(hub["id"]) == ["demo"]
+        child = next(page for page in fake.pages if page["parent_id"] == hub["id"])
+        bodies.append(fake.body_of(child["id"]))
+    assert bodies == ["# 첫 정리\n", "# 둘째 정리\n"]
 
 
 async def test_read_page_uses_the_advertised_argument_name() -> None:

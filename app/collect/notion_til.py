@@ -22,6 +22,10 @@ _TAG_KEYS = {"tag", "tags", "태그"}
 # 사용자가 하지도 않은 작업이 포트폴리오 근거로 실린다.
 _EXAMPLE_MARK = "[예시]"
 _GENERATED_LOG_PREFIXES = ("프로젝트 ", "포트폴리오 ")
+# 생성한 문서가 쌓이는 페이지. 하위 트리를 통째로 건너뛴다 — 제목에 이름이 붙으면
+# 접두사 검사는 빠져나가고, 우리가 쓴 문장이 다음 실행의 근거로 되돌아온다.
+# 이 계층은 app.publish 를 가져올 수 없어 notion_template.ARCHIVE_TITLE 과 같은 값을 다시 적는다.
+_ARCHIVE_TITLE = "생성된 포트폴리오 및 이력서"
 _TEMPLATE_TITLES = ("일일 Developer TIL 템플릿",)
 
 
@@ -111,7 +115,7 @@ async def _child_pages(
                 if item.get("type") == "child_page":
                     child = item.get("child_page") or {}
                     title = str(child.get("title") or "").strip()
-                    if _is_generated_log(title):
+                    if title == _ARCHIVE_TITLE or _is_generated_log(title):
                         continue
                     pages.append((item_id, title or None))
                     pending.append(item_id)

@@ -80,10 +80,16 @@ def test_collect_notion_til_reads_dated_child_pages_without_network() -> None:
 
 
 def test_dashboard_example_pages_are_not_collected_as_the_users_til() -> None:
-    """대시보드가 심어두는 예시 TIL은 날짜가 붙어 있어도 사용자의 기록이 아니다."""
-    from app.publish.notion_template import EXAMPLE_TITLES
+    """예시 TIL은 날짜가 붙어 있어도 사용자의 기록이 아니다.
 
-    titles = {f"page-{index}": title for index, title in enumerate(EXAMPLE_TITLES)}
+    새 대시보드는 더 이상 만들지 않지만, 이미 만들어진 대시보드에는 남아 있다.
+    """
+    legacy_examples = (
+        "2026-08-20 · [예시] 배포 지표 개선",
+        "2026-08-19 · [예시] ArgoCD 설정",
+        "2026-08-18 · [예시] HPA 적용 실험",
+    )
+    titles = {f"page-{index}": title for index, title in enumerate(legacy_examples)}
     titles["page-real"] = "2026-08-10 · AI 성능테스트 1일차"
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -126,6 +132,60 @@ def test_dashboard_example_pages_are_not_collected_as_the_users_til() -> None:
     collected = [entry.title for entry in snapshot.entries]
     assert collected == ["AI 성능테스트 1일차"]
     assert not any("[예시]" in title for title in collected)
+
+
+
+def test_the_archive_subtree_is_never_read_back_as_til() -> None:
+    """생성한 문서에는 날짜가 붙는다. 하위 트리째 건너뛰지 않으면 다음 실행의 근거가 된다."""
+    from app.collect.notion_til import _ARCHIVE_TITLE
+    from app.publish.notion_template import ARCHIVE_TITLE
+
+    assert _ARCHIVE_TITLE == ARCHIVE_TITLE
+
+    children = {
+        "dashboard": [
+            ("page-archive", ARCHIVE_TITLE),
+            ("page-real", "2026-08-10 · AI 성능테스트 1일차"),
+        ],
+        "page-archive": [("page-doc", "2026-08-10 · 황수빈 포트폴리오")],
+    }
+    titles = {
+        page_id: title for items in children.values() for page_id, title in items
+    }
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        path = request.url.path
+        if "/blocks/" in path and path.endswith("/children"):
+            parent = path.rsplit("/", 2)[-2]
+            return httpx.Response(
+                200,
+                json={
+                    "results": [
+                        {"id": page_id, "type": "child_page", "child_page": {"title": title}}
+                        for page_id, title in children.get(parent, [])
+                    ],
+                    "has_more": False,
+                },
+            )
+        if path.endswith("/markdown"):
+            return httpx.Response(200, json={"markdown": "본문"})
+        page_id = path.rsplit("/", 1)[-1]
+        return httpx.Response(
+            200,
+            json={
+                "id": page_id,
+                "properties": {"title": {"title": [{"plain_text": titles[page_id]}]}},
+            },
+        )
+
+    async def run() -> NotionSnapshot:
+        async with httpx.AsyncClient(
+            base_url="https://api.notion.com/v1",
+            transport=httpx.MockTransport(handler),
+        ) as client:
+            return await collect_notion_til("dashboard", NOTION_TOKEN, client=client)
+
+    assert [entry.title for entry in asyncio.run(run()).entries] == ["AI 성능테스트 1일차"]
 
 
 def test_undated_title_is_collected_when_the_body_table_has_a_date() -> None:

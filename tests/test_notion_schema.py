@@ -269,14 +269,14 @@ def test_child_page_mentions_are_read_from_the_parent_body() -> None:
         "title": "Developer TIL Dashboard",
         "text": (
             '<page url="https://app.notion.com/p/91116da5521c82e69cef81211aad24d9">'
-            "developer-portfolio-3-projects</page>\n"
+            "생성된 포트폴리오 및 이력서</page>\n"
             '<page url="https://notion.so/page-1">포트폴리오 2026-08-20</page>'
         ),
     }
     assert children_from(fetched) == [
         {
             "id": "91116da5-521c-82e6-9cef-81211aad24d9",
-            "title": "developer-portfolio-3-projects",
+            "title": "생성된 포트폴리오 및 이력서",
             "url": "https://app.notion.com/p/91116da5521c82e69cef81211aad24d9",
             "parent_id": None,
         },

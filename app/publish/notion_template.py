@@ -5,9 +5,11 @@ https://sedate-faucet-61e.notion.site/Developer-TIL-Dashboard-6f816da5521c83ed8d
 `templates/*.md` is a transcription of that tree. `ensure_dashboard` creates
 those files under the user's private root when the named page is missing.
 
-Two strings must never drift:
+Three strings must never drift:
 
 - the dashboard title, which is how we find the page again on the next job
+- `ARCHIVE_TITLE`, which is where generated documents land and which the
+  collector skips so we never read our own output back as evidence
 - the `##` headings inside the daily template, which are how the agent locates
   the GitHub evidence block without touching what the human wrote
 """
@@ -23,17 +25,15 @@ DASHBOARD_TITLE = "Developer TIL Dashboard"
 DASHBOARD_ICON = "🧑‍💻"
 
 DAILY_TEMPLATE_TITLE = "일일 Developer TIL — Portfolio Ready 템플릿"
-PORTFOLIO_TITLE = "developer-portfolio-3-projects"
+
+#: 생성된 포트폴리오·이력서가 쌓이는 페이지. 대시보드 직속이 아니라 이 아래로 들어간다.
+#: `collect.notion_til` 도 같은 제목으로 이 하위 트리를 건너뛴다 — 계층 규칙상 이 모듈을
+#: 가져올 수 없어 그쪽에 문자열이 한 번 더 있다.
+ARCHIVE_TITLE = "생성된 포트폴리오 및 이력서"
 
 #: The heading the agent fills in on a daily TIL. Everything else belongs to
 #: the human. Second-stage work keys off this exact string.
 EVIDENCE_HEADING = "## 💻 GitHub 작업 근거"
-
-EXAMPLE_TITLES = (
-    "2026-08-20 · [예시] 배포 지표 개선",
-    "2026-08-19 · [예시] ArgoCD 설정",
-    "2026-08-18 · [예시] HPA 적용 실험",
-)
 
 
 def _read(name: str) -> str:
@@ -42,8 +42,7 @@ def _read(name: str) -> str:
 
 DASHBOARD_BODY = _read("dashboard.md")
 DAILY_TEMPLATE_BODY = _read("daily.md")
-PORTFOLIO_BODY = _read("portfolio.md")
-_EXAMPLE_BANNER = _read("example-banner.md")
+ARCHIVE_BODY = _read("archive.md")
 
 
 def is_dashboard_title(title: str | None) -> bool:
@@ -61,13 +60,11 @@ class TemplatePage:
     body: str
 
 
+ARCHIVE_PAGE = TemplatePage(ARCHIVE_TITLE, "📂", ARCHIVE_BODY)
+
 CHILD_PAGES: tuple[TemplatePage, ...] = (
     TemplatePage(DAILY_TEMPLATE_TITLE, "📗", DAILY_TEMPLATE_BODY),
-    *(
-        TemplatePage(title, "📝", _EXAMPLE_BANNER + DAILY_TEMPLATE_BODY)
-        for title in EXAMPLE_TITLES
-    ),
-    TemplatePage(PORTFOLIO_TITLE, "💼", PORTFOLIO_BODY),
+    ARCHIVE_PAGE,
 )
 
 

@@ -11,12 +11,12 @@ import pytest
 
 from app.publish import notion_dashboard as dash
 from app.publish.notion_template import (
+    ARCHIVE_TITLE,
     CHILD_PAGES,
     DAILY_TEMPLATE_TITLE,
     DASHBOARD_ICON,
     DASHBOARD_TITLE,
     EVIDENCE_HEADING,
-    PORTFOLIO_TITLE,
     is_dashboard_title,
 )
 from tests.notion_double import NotionWorkspace
@@ -42,14 +42,12 @@ async def test_an_empty_workspace_gets_the_whole_template_tree() -> None:
     assert workspace.titles_under(ref.page_id) == [child.title for child in CHILD_PAGES]
 
 
-async def test_the_tree_keeps_every_page_the_doc_lists() -> None:
+async def test_the_tree_is_the_template_and_the_archive_and_nothing_else() -> None:
+    """예시 TIL 페이지는 더 이상 만들지 않는다. 사용자가 지운 뒤 다시 생기던 것들이다."""
     workspace = NotionWorkspace()
     ref = await dash.ensure_dashboard(workspace)
-    under = workspace.titles_under(ref.page_id)
 
-    assert DAILY_TEMPLATE_TITLE in under
-    assert PORTFOLIO_TITLE in under
-    assert sum(1 for title in under if "[예시]" in title) == 3
+    assert workspace.titles_under(ref.page_id) == [DAILY_TEMPLATE_TITLE, ARCHIVE_TITLE]
 
 
 async def test_the_daily_template_keeps_the_evidence_heading() -> None:
@@ -105,15 +103,14 @@ async def test_a_stale_known_id_falls_back_to_the_private_root() -> None:
 async def test_a_deleted_template_child_is_recreated_from_markdown() -> None:
     workspace = NotionWorkspace()
     dashboard = workspace.seed_dashboard()
-    workspace.seed(PORTFOLIO_TITLE, parent_id=dashboard, body="사람이 고친 포폴")
+    workspace.seed(ARCHIVE_TITLE, parent_id=dashboard, body="사람이 고친 안내문")
 
     await dash.ensure_dashboard(workspace, known_page_id=dashboard)
 
     assert workspace.body_of(
-        next(page["id"] for page in workspace.pages if page["title"] == PORTFOLIO_TITLE)
-    ) == "사람이 고친 포폴"
+        next(page["id"] for page in workspace.pages if page["title"] == ARCHIVE_TITLE)
+    ) == "사람이 고친 안내문"
     assert DAILY_TEMPLATE_TITLE in workspace.titles_under(dashboard)
-    assert sum(1 for title in workspace.titles_under(dashboard) if "[예시]" in title) == 3
 
 
 async def test_a_same_titled_page_nested_elsewhere_is_not_adopted() -> None:
@@ -159,6 +156,31 @@ async def test_an_unset_parent_is_refused_rather_than_defaulting_to_the_root() -
     workspace = NotionWorkspace()
     with pytest.raises(dash.OutsideDashboard):
         await dash.guard_parent(workspace, None)
+
+
+# -- archive -----------------------------------------------------------------
+
+
+async def test_the_archive_page_is_created_once_and_then_reused() -> None:
+    workspace = NotionWorkspace()
+    dashboard = workspace.seed_dashboard()
+
+    first = await dash.ensure_archive(workspace, dashboard)
+    second = await dash.ensure_archive(workspace, dashboard)
+
+    assert first == second
+    assert workspace.titles_under(dashboard) == [ARCHIVE_TITLE]
+
+
+async def test_the_archive_body_survives_a_second_run() -> None:
+    """생성된 문서를 담고 있는 페이지의 본문을 덮어쓰면 그 아래 문서가 사라진다."""
+    workspace = NotionWorkspace()
+    dashboard = workspace.seed_dashboard()
+    archive = workspace.seed(ARCHIVE_TITLE, parent_id=dashboard, body="사람이 고친 안내문")
+
+    assert await dash.ensure_archive(workspace, dashboard) == archive
+    assert workspace.body_of(archive) == "사람이 고친 안내문"
+    assert workspace.creates == []
 
 
 # -- upsert ------------------------------------------------------------------

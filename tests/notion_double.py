@@ -16,7 +16,7 @@ from __future__ import annotations
 from typing import Any
 
 from app.publish.notion_mcp import McpSession
-from app.publish.notion_template import DASHBOARD_TITLE
+from app.publish.notion_template import ARCHIVE_TITLE, DASHBOARD_TITLE
 
 LIVE_CREATE_PAGES: dict[str, Any] = {
     "type": "object",
@@ -117,9 +117,27 @@ class NotionWorkspace:
         )
 
     @property
+    def archive_id(self) -> str | None:
+        dashboard = self.dashboard_id
+        return next(
+            (
+                page["id"]
+                for page in self.pages
+                if page["title"] == ARCHIVE_TITLE and page["parent_id"] == dashboard
+            ),
+            None,
+        )
+
+    @property
     def logs(self) -> list[dict[str, Any]]:
-        """What the agent wrote under the dashboard, oldest first."""
-        return [page for page in self.pages if page["parent_id"] == self.dashboard_id]
+        """What the agent generated, oldest first.
+
+        Under the archive page, not the dashboard: the dashboard only ever
+        holds template pages. Empty until the first publish creates it — never
+        the root pages, which is what matching a `None` parent would give.
+        """
+        archive = self.archive_id
+        return [page for page in self.pages if archive and page["parent_id"] == archive]
 
     def body_of(self, page_id: str) -> str | None:
         page = self._get(page_id)

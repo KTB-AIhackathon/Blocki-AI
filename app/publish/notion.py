@@ -7,6 +7,10 @@ blocks Spring from storing the markdown, so every path here returns a
 
 Transport and schema live in `notion_mcp` / `notion_schema`. This file only
 decides what gets written, under what title, and when to not write at all.
+
+Everything generated lands under the dashboard's `생성된 포트폴리오 및 이력서`
+page, not the dashboard itself, so the sidebar keeps one entry instead of one
+per run.
 """
 
 from __future__ import annotations
@@ -25,8 +29,11 @@ from app.contracts import (
 from app.publish.notion_dashboard import (
     DashboardRef,
     OutsideDashboard,
+    child_titles,
+    ensure_archive,
     ensure_dashboard,
     guard_parent,
+    next_version,
     upsert_child,
 )
 from app.publish.notion_mcp import NotionSession, notion_mcp_url, open_session
@@ -42,6 +49,8 @@ __all__ = [
     "publish_artifact",
     "publish_markdown",
     "read_page",
+    "version_base",
+    "with_version",
 ]
 
 
@@ -55,6 +64,24 @@ def log_title(artifact: ArtifactPayload, target: NotionTarget | None) -> str:
         return target.title.strip()
     when = (target.log_date if target else None) or kst_today()
     return f"{artifact.title} {when.isoformat()}"
+
+
+def version_base(artifact: ArtifactPayload, target: NotionTarget | None) -> str:
+    """버전을 끼워 넣을 자리. Spring 이 제목을 직접 정했으면 손대지 않는다."""
+    if target is not None and (target.title or "").strip():
+        return ""
+    return artifact.title
+
+
+def with_version(title: str, base: str, siblings: list[str]) -> str:
+    """`이름 이력서 2026-08-20` → `이름 이력서 v3 2026-08-20`.
+
+    웹 아카이브가 판마다 한 줄씩 남기므로 Notion 도 같은 모양이어야 한다.
+    날짜만으로는 하루에 아홉 번 돌려도 페이지 하나가 계속 덮어써진다.
+    """
+    if not base:
+        return title
+    return title.replace(base, f"{base} v{next_version(siblings, base)}", 1)
 
 
 async def publish_artifact(
@@ -85,6 +112,7 @@ async def publish_artifact(
         notion_token=notion_token,
         parent_id=target.parent_id if target else None,
         session=session,
+        version_base=version_base(artifact, target),
     )
 
 
@@ -107,15 +135,20 @@ async def _publish_portfolio(
     try:
         live = session if session is not None else await open_session(token)
         dashboard = await guard_parent(live, target.parent_id if target else None)
+        archive = await ensure_archive(live, dashboard)
         when = (target.log_date if target else None) or kst_today()
-        portfolio_title = log_title(artifact, target)
-        hub_title = f"프로젝트 {when.isoformat()}"
+        # 한 번만 읽어서 문서와 허브 번호를 함께 매긴다.
+        siblings = await child_titles(live, archive)
+        portfolio_title = with_version(
+            log_title(artifact, target), version_base(artifact, target), siblings
+        )
+        hub_title = with_version(f"프로젝트 {when.isoformat()}", "프로젝트", siblings)
 
         hub_res, port_res = await asyncio.gather(
-            upsert_child(live, parent_id=dashboard, title=hub_title, markdown="# 프로젝트\n"),
+            upsert_child(live, parent_id=archive, title=hub_title, markdown="# 프로젝트\n"),
             upsert_child(
                 live,
-                parent_id=dashboard,
+                parent_id=archive,
                 title=portfolio_title,
                 markdown=artifact.body_markdown,
             ),
@@ -186,6 +219,7 @@ async def publish_markdown(
     notion_token: str,
     parent_id: str | None = None,
     session: NotionSession | None = None,
+    version_base: str = "",
 ) -> NotionWriteResult:
     token = (notion_token or "").strip()
     if not token:
@@ -195,8 +229,10 @@ async def publish_markdown(
     try:
         live = session if session is not None else await open_session(token)
         dashboard = await guard_parent(live, parent_id)
+        archive = await ensure_archive(live, dashboard)
+        final = with_version(title, version_base, await child_titles(live, archive))
         page_id, page_url, _ = await upsert_child(
-            live, parent_id=dashboard, title=title, markdown=markdown
+            live, parent_id=archive, title=final, markdown=markdown
         )
     except OutsideDashboard as exc:
         # Not a failure of ours to retry: the target is wrong, and writing
