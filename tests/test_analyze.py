@@ -359,6 +359,21 @@ def test_facts_copy_readme_lead_and_layout_without_rewriting() -> None:
     assert projects.readme_lead("# Only heading\n\n") is None
 
 
+def test_layout_uses_contents_name_not_stringified_dict() -> None:
+    leaked = (
+        "{'name': '.gitignore', 'path': '.gitignore', "
+        "'_links': {'html': 'https://github.com/acme/repo/blob/main/.gitignore'}}"
+    )
+    assert projects._layout(
+        [
+            {"name": ".gitignore", "path": ".gitignore", "_links": {"html": "https://x/.gitignore"}},
+            leaked,
+            "CONTRIBUTING.md'}}",
+            "Dockerfile",
+        ]
+    ) == [".gitignore", "CONTRIBUTING.md", "Dockerfile"]
+
+
 def test_readme_lead_prefers_body_over_link_blockquote() -> None:
     content = (
         "# clx-harness-full-package\n\n"

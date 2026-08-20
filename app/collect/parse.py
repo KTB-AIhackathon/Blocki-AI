@@ -411,6 +411,14 @@ def file_content(data: dict[str, Any]) -> str:
     return content
 
 
+def entry_name(item: Any) -> str:
+    """A GitHub contents row's file name. Never `str(dict)` — that leaks `'}}`."""
+    if isinstance(item, dict):
+        raw = item.get("name") or item.get("path") or ""
+        return str(raw).strip()
+    return str(item).strip() if item is not None else ""
+
+
 def manifest_names(raw: Any) -> list[str]:
     names: list[str] = []
     for item in as_list(raw):

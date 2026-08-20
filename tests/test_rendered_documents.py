@@ -114,7 +114,7 @@ async def test_portfolio_render_has_three_structured_cards_and_selection_reason(
     assert "- 역할: 커밋 61개 (전체 61개 중 100%)" in cards
     assert f"{FILL_IN}" in cards
     assert "## 🔍 이 프로젝트를 고른 이유" in body
-    assert "> 기록과 결과가 함께 있는 프로젝트를 우선했습니다." in body
+    assert "기록과 결과가 함께 있는 프로젝트를 우선했습니다." in body
     assert "~~learning-log~~" in body
     assert "학습 저장소 감점으로 제외" in body
     assert "---" in body

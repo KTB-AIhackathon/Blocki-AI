@@ -169,8 +169,15 @@ async def test_a_write_aimed_at_the_oauth_workspace_id_is_refused() -> None:
     workspace = NotionWorkspace()
     workspace.seed_dashboard()
 
-    with pytest.raises(dash.OutsideDashboard):
+    with pytest.raises(dash.OutsideDashboard, match="unreadable"):
         await dash.guard_parent(workspace, "workspace-abc123")
+
+
+async def test_a_missing_parent_names_the_404_instead_of_a_title_mismatch() -> None:
+    workspace = NotionWorkspace()
+
+    with pytest.raises(dash.OutsideDashboard, match="unreadable \\(404\\)"):
+        await dash.guard_parent(workspace, "3c2f4cfa-7b19-8181-a57c-de66f9c30d38")
 
 
 async def test_a_write_aimed_at_some_other_page_is_refused() -> None:

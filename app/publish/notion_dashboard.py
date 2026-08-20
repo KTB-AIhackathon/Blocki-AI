@@ -11,6 +11,7 @@ dashboard. Workspace-wide search is not used: it walks pages we do not own.
 
 from __future__ import annotations
 
+import logging
 import re
 from dataclasses import dataclass
 from typing import Any
@@ -42,6 +43,7 @@ __all__ = [
 
 #: `이름 종류 v3 2026-08-20` 의 버전 자리.
 _VERSION = re.compile(r"^\s+v(\d+)\b")
+log = logging.getLogger(__name__)
 
 
 class OutsideDashboard(RuntimeError):
@@ -96,8 +98,14 @@ async def guard_parent(session: NotionSession, parent_id: str | None) -> str:
     target = (parent_id or "").strip()
     if not target:
         raise OutsideDashboard("notion parent is not set; run ensure after connecting")
-    if not await _is_dashboard(session, target):
-        raise OutsideDashboard(f"parent {target} is not the {DASHBOARD_TITLE} page")
+    title, error = await _probe_title(session, target)
+    if error:
+        raise OutsideDashboard(f"parent {target} unreadable ({error})")
+    if not is_dashboard_title(title):
+        raise OutsideDashboard(
+            f"parent {target} is not the {DASHBOARD_TITLE} page "
+            f"(title={title or 'empty'})"
+        )
     return target
 
 
@@ -290,7 +298,35 @@ def _is_conflict(error: BaseException) -> bool:
 
 
 async def _is_dashboard(session: NotionSession, page_id: str) -> bool:
-    try:
-        return is_dashboard_title(title_of(await session.read_page(page_id)))
-    except Exception:
+    title, error = await _probe_title(session, page_id)
+    if error:
         return False
+    return is_dashboard_title(title)
+
+
+async def _probe_title(
+    session: NotionSession, page_id: str
+) -> tuple[str | None, str | None]:
+    """`(title, error)`. `error` is set when the page could not be read."""
+    try:
+        title = title_of(await session.read_page(page_id))
+        log.info(
+            "notion parent probe page=%s title=%s readable=True",
+            page_id,
+            title or "-",
+        )
+        return title, None
+    except Exception as exc:
+        text = str(exc).lower()
+        if "404" in text or "not found" in text:
+            status = "404"
+        elif "403" in text or "restricted" in text:
+            status = "403"
+        else:
+            status = "error"
+        log.warning(
+            "notion parent probe page=%s readable=False status=%s",
+            page_id,
+            status,
+        )
+        return None, status

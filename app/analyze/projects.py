@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 from collections.abc import Callable
 from datetime import datetime
-from typing import Literal, TypeVar
+from typing import Any, Literal, TypeVar
 
 from app.contracts import (
     ChangeType,
@@ -64,6 +64,7 @@ _MD_LINK = re.compile(r"\[([^\]]*)\]\([^)]+\)")
 _MARKUP = re.compile(r"[*_`<>#\[\]()]+")
 _CODE_FENCE = {"bash", "sh", "zsh", "shell", "powershell", "ps1", "python", "py", "js", "ts", "json", "yaml", "yml"}
 _DIR_NAME = re.compile(r"^[\w.\-]+$")
+_LEAK_TAIL = re.compile(r"[\"']\}+$")
 
 
 def facts_of(
@@ -243,16 +244,26 @@ def _pointer(line: str) -> bool:
     return has_url and len(leftover) < 40
 
 
-def _layout(paths: list[str], *, limit: int = 8) -> list[str]:
+def _layout(paths: list[Any], *, limit: int = 8) -> list[str]:
     seen: list[str] = []
     for path in paths:
-        name = (path or "").strip().rsplit("/", 1)[-1]
+        name = _file_name(path)
         if not name or name in seen:
             continue
         seen.append(name)
         if len(seen) >= limit:
             break
     return seen
+
+
+def _file_name(item: Any) -> str:
+    """Basename of a contents row. Drops `str(dict)` leftovers like `.gitignore'}}`."""
+    if isinstance(item, dict):
+        raw = str(item.get("name") or item.get("path") or "").strip()
+    else:
+        raw = str(item or "").strip()
+    name = raw.rsplit("/", 1)[-1].split("?", 1)[0]
+    return _LEAK_TAIL.sub("", name).strip()
 
 
 def _mine(commits: list[CommitSummary], viewer: ViewerIdentity) -> list[CommitSummary]:
