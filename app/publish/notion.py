@@ -11,6 +11,7 @@ decides what gets written, under what title, and when to not write at all.
 
 from __future__ import annotations
 
+import asyncio
 from datetime import date, timedelta, timezone
 from typing import Any
 
@@ -62,9 +63,20 @@ async def publish_artifact(
     notion_token: str,
     target: NotionTarget | None,
     session: NotionSession | None = None,
+    briefs: list[dict[str, str]] | None = None,
+    publish_warnings: list[str] | None = None,
 ) -> NotionWriteResult:
     if artifact is None:
         return NotionWriteResult(skipped_reason="no_artifact")
+    if artifact.kind == "portfolio" and briefs:
+        return await _publish_portfolio(
+            artifact,
+            briefs=briefs,
+            notion_token=notion_token,
+            target=target,
+            session=session,
+            publish_warnings=publish_warnings,
+        )
     return await publish_markdown(
         title=log_title(artifact, target),
         markdown=artifact.body_markdown,
@@ -72,6 +84,91 @@ async def publish_artifact(
         parent_id=target.parent_id if target else None,
         session=session,
     )
+
+
+async def _publish_portfolio(
+    artifact: ArtifactPayload,
+    *,
+    briefs: list[dict[str, str]],
+    notion_token: str,
+    target: NotionTarget | None,
+    session: NotionSession | None,
+    publish_warnings: list[str] | None,
+) -> NotionWriteResult:
+    token = (notion_token or "").strip()
+    if not token:
+        return NotionWriteResult(skipped_reason="missing_token")
+    if not (artifact.body_markdown or "").strip():
+        return NotionWriteResult(skipped_reason="no_markdown")
+    notes = publish_warnings if publish_warnings is not None else []
+    try:
+        live = session if session is not None else await open_session(token)
+        dashboard = await guard_parent(live, target.parent_id if target else None)
+        when = (target.log_date if target else None) or kst_today()
+        portfolio_title = log_title(artifact, target)
+        hub_title = f"프로젝트 {when.isoformat()}"
+
+        hub_res, port_res = await asyncio.gather(
+            upsert_child(live, parent_id=dashboard, title=hub_title, markdown="# 프로젝트\n"),
+            upsert_child(
+                live,
+                parent_id=dashboard,
+                title=portfolio_title,
+                markdown=artifact.body_markdown,
+            ),
+            return_exceptions=True,
+        )
+    except OutsideDashboard as exc:
+        return NotionWriteResult(attempted=False, skipped_reason=_scrub(str(exc), token))
+    except Exception as exc:
+        return _failed(_scrub(str(exc), token) or "notion write failed")
+    if isinstance(port_res, BaseException):
+        return _failed(_scrub(str(port_res), token) or "notion write failed")
+    page_id, page_url, _ = port_res
+    if not page_id:
+        return _failed("notion create page returned no id")
+    if isinstance(hub_res, BaseException) or not hub_res[0]:
+        notes.append("프로젝트 허브를 만들지 못했습니다")
+        return NotionWriteResult(attempted=True, ok=True, page_id=page_id, page_url=page_url)
+    hub_id, _, _ = hub_res
+
+    children = await asyncio.gather(
+        *(_upsert_brief(live, hub_id, brief) for brief in briefs),
+        return_exceptions=True,
+    )
+    mentions: list[str] = []
+    for brief, item in zip(briefs, children):
+        if isinstance(item, BaseException):
+            notes.append(f"{brief['title']} 페이지를 쓰지 못했습니다")
+            continue
+        child_id, child_url = item
+        if not child_id:
+            notes.append(f"{brief['title']} 페이지를 쓰지 못했습니다")
+            continue
+        mentions.append(f'<page url="{child_url or f"https://notion.so/{child_id}"}">{brief["title"]}</page>')
+    try:
+        await live.update_page(hub_id, _hub_index(mentions))
+    except Exception:
+        notes.append("프로젝트 허브 인덱스를 갱신하지 못했습니다")
+    return NotionWriteResult(attempted=True, ok=True, page_id=page_id, page_url=page_url)
+
+
+async def _upsert_brief(
+    session: NotionSession, hub_id: str, brief: dict[str, str]
+) -> tuple[str | None, str | None]:
+    page_id, page_url, _ = await upsert_child(
+        session,
+        parent_id=hub_id,
+        title=brief["title"],
+        markdown=brief["markdown"],
+    )
+    return page_id, page_url
+
+
+def _hub_index(mentions: list[str]) -> str:
+    if not mentions:
+        return "# 프로젝트\n"
+    return "# 프로젝트\n\n" + "\n".join(mentions) + "\n"
 
 
 async def publish_markdown(

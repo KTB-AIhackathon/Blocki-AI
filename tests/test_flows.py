@@ -50,6 +50,13 @@ def github(monkeypatch: pytest.MonkeyPatch) -> FakeGitHub:
         return await real(req, github_pat, call_tool=fake)
 
     monkeypatch.setattr("app.api.jobs.collect_github", collect)
+
+    async def empty_til(parent_id="", token="", **_kwargs):
+        from app.contracts import NotionSnapshot
+
+        return NotionSnapshot(entries=[], complete=True)
+
+    monkeypatch.setattr("app.api.jobs.collect_notion_til", empty_til)
     return fake
 
 
@@ -64,6 +71,13 @@ def notion(monkeypatch: pytest.MonkeyPatch) -> NotionWorkspace:
         return mcp_session(workspace)
 
     monkeypatch.setattr("app.publish.notion.open_session", open_session)
+
+    async def empty_til(parent_id, token, **_kwargs):
+        from app.contracts import NotionSnapshot
+
+        return NotionSnapshot(entries=[], complete=True)
+
+    monkeypatch.setattr("app.api.jobs.collect_notion_til", empty_til)
     return workspace
 
 
@@ -122,18 +136,19 @@ def test_portfolio_flows_from_github_to_spring_and_notion(
     assert "## 프로젝트" in markdown
     assert "https://github.com/acme/demo" in markdown
 
-    assert body["notion"] == {
-        "attempted": True,
-        "ok": True,
-        "page_id": "page-2",
-        "page_url": "https://notion.so/page-2",
-        "skipped_reason": None,
-        "error": None,
-    }
-    page = notion.logs[0]
-    assert page["title"] == "포트폴리오 2026-08-20"
+    page = next(item for item in notion.logs if item["title"] == "포트폴리오 2026-08-20")
+    hub = next(item for item in notion.logs if item["title"] == "프로젝트 2026-08-20")
+    assert body["notion"]["ok"] is True
+    assert body["notion"]["page_id"] == page["id"]
     assert page["parent_id"] == DASHBOARD_ID
-    assert page["markdown"] == markdown, "Notion and Spring must get the same bytes"
+    assert hub["parent_id"] == DASHBOARD_ID
+    assert page["markdown"] == markdown, "Spring preview is the portfolio page, not the briefs"
+    assert notion.titles_under(hub["id"])
+    assert all(
+        "날짜:" not in (page["markdown"] or "")
+        for page in notion.pages
+        if page["parent_id"] == hub["id"]
+    )
 
 
 def test_portfolio_reads_full_history_and_ignores_the_cursor(
@@ -166,7 +181,8 @@ def test_portfolio_needs_no_career_fields(
         document={"kind": "portfolio", "profile_fields": {"name": "홍길동"}},
     )
     assert body["ok"] is True
-    assert len(notion.logs) == 1
+    assert any(page["title"] == "포트폴리오 2026-08-20" for page in notion.logs)
+    assert any(page["title"] == "프로젝트 2026-08-20" for page in notion.logs)
 
 
 # --------------------------------------------------------------------------
@@ -237,10 +253,10 @@ def test_portfolio_and_resume_are_different_documents_from_one_snapshot(
     assert one.startswith("# 홍길동") and "## 프로젝트" in one
     assert two.startswith("# 홍길동") and "## 주요 작업" in two
     assert "## 프로젝트" not in two and "## 주요 작업" not in one
-    assert [page["title"] for page in notion.logs] == [
-        "포트폴리오 2026-08-20",
-        "이력서 2026-08-20",
-    ]
+    titles = [page["title"] for page in notion.logs]
+    assert "포트폴리오 2026-08-20" in titles
+    assert "프로젝트 2026-08-20" in titles
+    assert titles[-1] == "이력서 2026-08-20"
 
 
 # --------------------------------------------------------------------------
@@ -343,8 +359,9 @@ def test_every_pipeline_sends_spring_and_notion_the_same_document(
     assert result["artifact"]["content_type"] == "text/markdown"
     assert result["proposal"]["proposal_digest"]
     assert result["notion"]["ok"] is True
-    assert notion.logs[0]["markdown"] == result["artifact"]["body_markdown"]
-    assert notion.logs[0]["parent_id"] == DASHBOARD_ID
+    page = next(item for item in notion.pages if item["id"] == result["notion"]["page_id"])
+    assert page["markdown"] == result["artifact"]["body_markdown"]
+    assert page["parent_id"] == DASHBOARD_ID
 
 
 def test_a_notion_outage_still_delivers_the_document_to_spring(

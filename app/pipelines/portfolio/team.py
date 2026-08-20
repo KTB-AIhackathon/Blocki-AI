@@ -106,6 +106,8 @@ def density_of(project: ProjectFacts) -> int:
         filled += 1
     if project.pull_requests or project.issues:
         filled += 1
+    if project.til:
+        filled += 1
     return filled
 
 

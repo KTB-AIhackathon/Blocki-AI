@@ -126,3 +126,80 @@ def test_dashboard_example_pages_are_not_collected_as_the_users_til() -> None:
     collected = [entry.title for entry in snapshot.entries]
     assert collected == ["AI 성능테스트 1일차"]
     assert not any("[예시]" in title for title in collected)
+
+
+def test_generated_project_logs_are_not_walked_as_til() -> None:
+    seen_children: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        path = request.url.path
+        if path.endswith("/children"):
+            seen_children.append(path)
+            if path.endswith("/blocks/dashboard/children"):
+                return httpx.Response(
+                    200,
+                    json={
+                        "results": [
+                            {
+                                "id": "hub",
+                                "type": "child_page",
+                                "child_page": {"title": "프로젝트 2026-08-20"},
+                            },
+                            {
+                                "id": "page-real",
+                                "type": "child_page",
+                                "child_page": {"title": "2026-08-20 · 캐시 개선"},
+                            },
+                            {
+                                "id": "folio",
+                                "type": "child_page",
+                                "child_page": {"title": "포트폴리오 2026-08-20"},
+                            },
+                        ],
+                        "has_more": False,
+                    },
+                )
+            if path.endswith("/blocks/hub/children"):
+                return httpx.Response(
+                    200,
+                    json={
+                        "results": [
+                            {
+                                "id": "fake-til",
+                                "type": "child_page",
+                                "child_page": {"title": "2026-08-20 · 가짜 학습"},
+                            }
+                        ],
+                        "has_more": False,
+                    },
+                )
+            return httpx.Response(200, json={"results": [], "has_more": False})
+        if path.endswith("/markdown"):
+            return httpx.Response(200, json={"markdown": "본문"})
+        page_id = path.rsplit("/", 1)[-1]
+        titles = {
+            "page-real": "2026-08-20 · 캐시 개선",
+            "hub": "프로젝트 2026-08-20",
+            "folio": "포트폴리오 2026-08-20",
+        }
+        return httpx.Response(
+            200,
+            json={
+                "id": page_id,
+                "properties": {
+                    "title": {"title": [{"plain_text": titles.get(page_id, page_id)}]}
+                },
+            },
+        )
+
+    async def run() -> NotionSnapshot:
+        async with httpx.AsyncClient(
+            base_url="https://api.notion.com/v1",
+            transport=httpx.MockTransport(handler),
+        ) as client:
+            return await collect_notion_til("dashboard", NOTION_TOKEN, client=client)
+
+    snapshot = asyncio.run(run())
+    assert [entry.title for entry in snapshot.entries] == ["캐시 개선"]
+    assert not any(path.endswith("/blocks/hub/children") for path in seen_children)
+    assert not any(path.endswith("/blocks/folio/children") for path in seen_children)

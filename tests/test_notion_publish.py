@@ -176,6 +176,61 @@ async def test_a_server_without_a_create_tool_names_what_it_offered() -> None:
     assert result.error is not None and "notion-fetch" in result.error.message
 
 
+async def test_portfolio_publish_writes_hub_children_and_keeps_page_id_on_the_doc() -> None:
+    fake = FakeSession()
+    warnings: list[str] = []
+    result = await notion.publish_artifact(
+        ArtifactPayload(
+            kind="portfolio",
+            title="포트폴리오",
+            body_markdown="# 홍길동\n\n## 프로젝트\n\n### demo\n",
+            proposal_id="p1",
+        ),
+        notion_token=NOTION_TOKEN,
+        target=fake.target(log_date=date(2026, 8, 20)),
+        session=fake,
+        briefs=[{"title": "demo", "markdown": "# demo\n\n- 기간: 2026.08\n"}],
+        publish_warnings=warnings,
+    )
+
+    folio = next(page for page in fake.logs if page["title"] == "포트폴리오 2026-08-20")
+    hub = next(page for page in fake.logs if page["title"] == "프로젝트 2026-08-20")
+    assert result.ok is True
+    assert result.page_id == folio["id"]
+    assert fake.titles_under(hub["id"]) == ["demo"]
+    child = next(page for page in fake.pages if page["title"] == "demo")
+    assert "날짜:" not in (child["markdown"] or "")
+    assert warnings == []
+
+
+async def test_portfolio_publish_rerun_updates_same_hub_and_child() -> None:
+    fake = FakeSession()
+    target = fake.target(log_date=date(2026, 8, 20))
+    payload = ArtifactPayload(
+        kind="portfolio", title="포트폴리오", body_markdown="# 첫\n", proposal_id="p1"
+    )
+    first = await notion.publish_artifact(
+        payload,
+        notion_token=NOTION_TOKEN,
+        target=target,
+        session=fake,
+        briefs=[{"title": "demo", "markdown": "# 첫 정리\n"}],
+    )
+    second = await notion.publish_artifact(
+        payload.model_copy(update={"body_markdown": "# 둘\n"}),
+        notion_token=NOTION_TOKEN,
+        target=target,
+        session=fake,
+        briefs=[{"title": "demo", "markdown": "# 둘째 정리\n"}],
+    )
+    hub = next(page for page in fake.logs if page["title"] == "프로젝트 2026-08-20")
+    assert first.page_id == second.page_id
+    assert fake.titles_under(fake.parent).count("프로젝트 2026-08-20") == 1
+    assert fake.titles_under(hub["id"]) == ["demo"]
+    child_id = next(page["id"] for page in fake.pages if page["title"] == "demo")
+    assert fake.body_of(child_id) == "# 둘째 정리\n"
+
+
 async def test_read_page_uses_the_advertised_argument_name() -> None:
     sink: list = []
     schema = {"type": "object", "properties": {"url": {"type": "string"}}, "required": ["url"]}

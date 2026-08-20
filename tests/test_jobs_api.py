@@ -4,7 +4,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.api.jobs import handle_job
-from app.contracts import DocumentSpec, JobRequest, ProfileFields
+from app.contracts import DocumentSpec, JobRequest, NotionSnapshot, ProfileFields, TilEntry
 from app.main import create_app
 from tests.conftest import NOTION_TOKEN, PAT, FakeGitHub
 
@@ -23,6 +23,14 @@ FIELDS = ProfileFields(
 def client(monkeypatch: pytest.MonkeyPatch) -> TestClient:
     monkeypatch.setenv("INTERNAL_API_KEY", KEY)
     return TestClient(create_app())
+
+
+@pytest.fixture(autouse=True)
+def stub_til(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def empty(parent_id="", token="", **_kwargs):
+        return NotionSnapshot(entries=[], complete=True)
+
+    monkeypatch.setattr("app.api.jobs.collect_notion_til", empty)
 
 
 @pytest.fixture
@@ -254,3 +262,45 @@ async def test_portfolio_job_uses_200_second_budget(
     result = await handle_job(job, PAT)
     assert result.ok is True
     assert seen["timeout"] == 200
+
+
+async def test_portfolio_job_joins_til_when_notion_is_connected(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from datetime import date
+
+    async def til_collect(parent_id, token, **_kwargs):
+        return NotionSnapshot(
+            entries=[
+                TilEntry(
+                    date=date(2026, 8, 20),
+                    title="캐시 개선",
+                    body_markdown="작업 저장소: https://github.com/acme/demo",
+                    page_id="til-1",
+                )
+            ],
+            complete=True,
+        )
+
+    monkeypatch.setattr("app.api.jobs.collect_notion_til", til_collect)
+    fake = FakeGitHub()
+    real = __import__("app.collect.github", fromlist=["collect_github"]).collect_github
+
+    async def collect(req, github_pat, **_kwargs):
+        return await real(req, github_pat, call_tool=fake)
+
+    monkeypatch.setattr("app.api.jobs.collect_github", collect)
+    job = JobRequest(
+        job_id="j1",
+        user_id="u1",
+        job_type="portfolio",
+        repos=[{"owner": "acme", "name": "demo"}],
+        notion={"parent_id": "dashboard"},
+        document=DocumentSpec(kind="portfolio", profile_fields=FIELDS),
+    )
+    result = await handle_job(job, PAT, NOTION_TOKEN)
+    body = result.artifact.body_markdown if result.artifact else ""
+    assert result.ok is True
+    assert "캐시 개선" in body
+    assert "**배운 것**" in body
+    assert "publish_briefs" not in result.proposal.model_dump()

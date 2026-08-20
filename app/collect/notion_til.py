@@ -21,6 +21,7 @@ _TAG_KEYS = {"tag", "tags", "태그"}
 # 대시보드가 링크 동작을 보여주려고 만드는 예시 TIL은 날짜가 붙어 있어 그냥 두면
 # 사용자가 하지도 않은 작업이 포트폴리오 근거로 실린다.
 _EXAMPLE_MARK = "[예시]"
+_GENERATED_LOG_PREFIXES = ("프로젝트 ", "포트폴리오 ")
 
 
 def make_notion_til_collector(
@@ -108,7 +109,10 @@ async def _child_pages(
                     continue
                 if item.get("type") == "child_page":
                     child = item.get("child_page") or {}
-                    pages.append((item_id, str(child.get("title") or "").strip() or None))
+                    title = str(child.get("title") or "").strip()
+                    if _is_generated_log(title):
+                        continue
+                    pages.append((item_id, title or None))
                     pending.append(item_id)
                 elif item.get("has_children"):
                     pending.append(item_id)
@@ -127,14 +131,16 @@ async def _read_entry(
     headers: dict[str, str],
 ) -> TilEntry | None:
     if fallback_title and (
-        _EXAMPLE_MARK in fallback_title or _title_parts(fallback_title, "")[0] is None
+        _EXAMPLE_MARK in fallback_title
+        or _is_generated_log(fallback_title)
+        or _title_parts(fallback_title, "")[0] is None
     ):
         return None
     page = await _request(client, "GET", f"/pages/{page_id}", headers)
     markdown_payload = await _request(client, "GET", f"/pages/{page_id}/markdown", headers)
     markdown = str(markdown_payload.get("markdown") or "")
     raw_title = _title_of(page) or fallback_title or page_id
-    if _EXAMPLE_MARK in raw_title:
+    if _EXAMPLE_MARK in raw_title or _is_generated_log(raw_title):
         return None
     parsed_date, title = _title_parts(raw_title, markdown)
     if parsed_date is None:
@@ -216,6 +222,10 @@ def _tags_of(page: dict[str, Any]) -> list[str]:
         if isinstance(selected, dict) and selected.get("name"):
             return [str(selected["name"]).strip()]
     return []
+
+
+def _is_generated_log(title: str) -> bool:
+    return title.startswith(_GENERATED_LOG_PREFIXES)
 
 
 def _safe_error(exc: Exception, token: str) -> str:

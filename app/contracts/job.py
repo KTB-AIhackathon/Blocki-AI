@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import date, datetime
 from typing import Literal
 
-from pydantic import BaseModel, Field, computed_field, model_validator
+from pydantic import BaseModel, Field, PrivateAttr, computed_field, model_validator
 
 from app.contracts.common import JobError, sha256_hex
 from app.contracts.evidence import EvidenceRef
@@ -117,6 +117,7 @@ class ArtifactProposal(BaseModel):
     action_digest: str | None = None
     warnings: list[str] = Field(default_factory=list)
     error: JobError | None = None
+    _publish_briefs: list[dict[str, str]] = PrivateAttr(default_factory=list)
 
 
 class ArtifactPayload(BaseModel):

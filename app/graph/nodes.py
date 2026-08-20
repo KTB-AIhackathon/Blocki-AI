@@ -46,14 +46,19 @@ def collect_node(
     return collect
 
 
-def build_node(req: JobRequest):
+def build_node(req: JobRequest, deadline: float | None = None):
     async def build(state: _State) -> _State:
-        til = state.get("til")
-        if til is None:
-            proposal = await pipelines.run(req, state["snapshot"])
-        else:
-            proposal = await pipelines.run(req, state["snapshot"], til=til)
-        return {"proposal": proposal, "artifact": artifact_from(proposal)}
+        kwargs: dict = {}
+        if "til" in state:
+            kwargs["til"] = state["til"]
+        if deadline is not None:
+            kwargs["deadline"] = deadline
+        proposal = await pipelines.run(req, state["snapshot"], **kwargs)
+        out: _State = {"proposal": proposal, "artifact": artifact_from(proposal)}
+        briefs = list(getattr(proposal, "_publish_briefs", []) or [])
+        if briefs:
+            out["briefs"] = briefs
+        return out
 
     return build
 
@@ -65,11 +70,22 @@ def publish_node(req: JobRequest, notion_token: str, publish_fn=publish_artifact
             return {"notion": None}
         if not notion_token:
             return {"notion": NotionWriteResult(skipped_reason="missing_token")}
+        extra: list[str] = []
+        kwargs: dict = {}
+        if state.get("briefs"):
+            kwargs["briefs"] = state["briefs"]
+            kwargs["publish_warnings"] = extra
         result = await publish_fn(
             state.get("artifact"),
             notion_token=notion_token,
             target=req.notion,
+            **kwargs,
         )
+        if extra:
+            proposal = proposal.model_copy(
+                update={"warnings": [*proposal.warnings, *extra]}
+            )
+            return {"notion": result, "proposal": proposal}
         return {"notion": result}
 
     return publish

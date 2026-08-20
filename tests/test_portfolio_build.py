@@ -16,6 +16,7 @@ from app.contracts import (
     SkillFact,
     ViewerIdentity,
 )
+from app.pipelines.portfolio import briefs
 from app.pipelines.portfolio import build as portfolio_build
 from tests.test_llm_guard import FakeLLM
 
@@ -514,3 +515,26 @@ def _project_tail() -> list[ProjectFacts]:
         _project("gamma", sha="c" * 12, subject="fix: 타임아웃 수정", commits=8),
         _project("delta", sha="d" * 12, subject="chore: 설정 정리", commits=2),
     ]
+
+
+async def test_first_pass_briefs_cover_every_candidate_not_the_portfolio() -> None:
+    proposal = await build_portfolio(llm=None)
+    sheets = proposal._publish_briefs
+    titles = [item["title"] for item in sheets]
+
+    assert titles == ["alpha", "beta", "gamma", "delta"]
+    assert "### delta" not in proposal.body_markdown
+    assert any("## 커밋" in item["markdown"] for item in sheets)
+    assert all("날짜:" not in item["markdown"] for item in sheets)
+    assert all("## 소개" not in item["markdown"] for item in sheets)
+    dumped = proposal.model_dump()
+    assert "publish_briefs" not in dumped
+    assert "_publish_briefs" not in dumped
+
+
+def test_brief_renderer_keeps_original_work_titles() -> None:
+    evidence = evidence_of(four_projects())
+    sheets = briefs.render_briefs(evidence)
+    alpha = next(item for item in sheets if item["title"] == "alpha")
+    assert "feat: 결제 API 구현" in alpha["markdown"]
+    assert "날짜:" not in alpha["markdown"]

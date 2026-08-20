@@ -89,6 +89,29 @@ async def test_graph_without_notion_token_omits_node_and_til_argument(monkeypatc
 
 
 @pytest.mark.asyncio
+async def test_graph_forwards_deadline_into_build(monkeypatch) -> None:
+    calls: list[dict] = []
+
+    async def run(_request, _snapshot, **kwargs):
+        calls.append(kwargs)
+        return proposal("body")
+
+    monkeypatch.setattr(pipelines, "run", run)
+    graph = compile_graph(
+        request(),
+        pipelines.resolve("portfolio"),
+        pat="pat",
+        notion_token="",
+        repos=[],
+        deadline=12.5,
+        collect_fn=collect_github,
+        publish_fn=publish,
+    )
+    await graph.ainvoke({})
+    assert calls == [{"deadline": 12.5}]
+
+
+@pytest.mark.asyncio
 async def test_graph_passes_notion_facts_into_built_document(monkeypatch) -> None:
     til = NotionSnapshot(
         entries=[

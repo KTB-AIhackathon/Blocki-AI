@@ -9,30 +9,26 @@ from __future__ import annotations
 import asyncio
 import os
 import time
-from typing import TypedDict
 
 from fastapi import APIRouter
-from langgraph.graph import END, START, StateGraph
 from pydantic import model_validator
 
 from app import pipelines
 from app.api.deps import GitHubPat, InternalKey, NotionToken
 from app.collect import collect_github
+from app.collect.notion_til import collect_notion_til
 from app.contracts import (
-    ArtifactPayload,
     ArtifactProposal,
-    CollectRequest,
     GitHubCollectError,
     GitHubSnapshot,
     JobError,
     JobRequest,
     JobResult,
-    NotionWriteResult,
     RepoRef,
     SnapshotSummary,
-    artifact_from,
     snapshot_summary_of,
 )
+from app.graph import compile_graph
 from app.publish import publish_artifact
 
 router = APIRouter()
@@ -51,13 +47,6 @@ class JobIngressRequest(JobRequest):
         if pipeline.requires == "readme" and self.readme is None:
             raise ValueError("readme is required for readme_proposal")
         return self
-
-
-class _State(TypedDict, total=False):
-    snapshot: GitHubSnapshot
-    proposal: ArtifactProposal
-    artifact: ArtifactPayload | None
-    notion: NotionWriteResult | None
 
 
 @router.post("/internal/jobs", response_model=JobResult)
@@ -87,8 +76,16 @@ async def handle_job(req: JobRequest, github_pat: str, notion_token: str = "") -
 
     timeout = float(os.environ.get("JOB_TIMEOUT", pipeline.timeout_seconds))
     deadline = time.monotonic() + timeout
-    graph = _compile(
-        req, pipeline, pat=pat, notion_token=(notion_token or "").strip(), deadline=deadline
+    graph = compile_graph(
+        req,
+        pipeline,
+        pat=pat,
+        notion_token=(notion_token or "").strip(),
+        repos=_repos(req),
+        deadline=deadline,
+        collect_fn=collect_github,
+        notion_collect_fn=collect_notion_til,
+        publish_fn=publish_artifact,
     )
     try:
         out = await asyncio.wait_for(graph.ainvoke({}), timeout=timeout)
@@ -114,56 +111,6 @@ async def handle_job(req: JobRequest, github_pat: str, notion_token: str = "") -
         next_cursor=list(snapshot.next_cursor) if snapshot.complete else [],
         error=None if ok else proposal.error,
     )
-
-
-def _compile(
-    req: JobRequest,
-    pipeline: pipelines.Pipeline,
-    *,
-    pat: str,
-    notion_token: str,
-    deadline: float | None = None,
-):
-    async def collect(_state: _State) -> _State:
-        snapshot = await collect_github(
-            CollectRequest(
-                job_id=req.job_id,
-                repos=_repos(req),
-                since=req.since,
-                cursor=req.cursor,
-                policy=pipeline.policy,
-                readme_path=req.readme.path if req.readme else None,
-            ),
-            pat,
-        )
-        return {"snapshot": snapshot}
-
-    async def build(state: _State) -> _State:
-        proposal = await pipelines.run(req, state["snapshot"], deadline=deadline)
-        return {"proposal": proposal, "artifact": artifact_from(proposal)}
-
-    async def publish(state: _State) -> _State:
-        proposal = state["proposal"]
-        if proposal.status in BLOCKING_STATUSES:
-            return {"notion": None}
-        if not notion_token:
-            return {"notion": NotionWriteResult(skipped_reason="missing_token")}
-        result = await publish_artifact(
-            state.get("artifact"),
-            notion_token=notion_token,
-            target=req.notion,
-        )
-        return {"notion": result}
-
-    graph = StateGraph(_State)
-    graph.add_node("collect", collect)
-    graph.add_node("build", build)
-    graph.add_node("publish", publish)
-    graph.add_edge(START, "collect")
-    graph.add_edge("collect", "build")
-    graph.add_edge("build", "publish")
-    graph.add_edge("publish", END)
-    return graph.compile()
 
 
 def _repos(req: JobRequest) -> list[RepoRef]:

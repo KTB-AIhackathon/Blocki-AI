@@ -1,4 +1,4 @@
 from app.pipelines.portfolio.build import build
-from app.pipelines.portfolio import team
+from app.pipelines.portfolio import briefs, team
 
-__all__ = ["build", "team"]
+__all__ = ["briefs", "build", "team"]

@@ -25,6 +25,7 @@ class _State(TypedDict, total=False):
     til: NotionSnapshot | None
     proposal: ArtifactProposal
     artifact: ArtifactPayload | None
+    briefs: list[dict[str, str]]
     notion: NotionWriteResult | None
 
 
@@ -35,6 +36,7 @@ def compile_graph(
     pat: str,
     notion_token: str,
     repos: list[RepoRef],
+    deadline: float | None = None,
     collect_fn=collect_github,
     notion_collect_fn=collect_notion_til,
     publish_fn=publish_artifact,
@@ -45,7 +47,7 @@ def compile_graph(
         graph.add_node(
             "collect_notion", collect_notion_node(req, notion_token, notion_collect_fn)
         )
-    graph.add_node("build", build_node(req))
+    graph.add_node("build", build_node(req, deadline=deadline))
     graph.add_node("publish", publish_node(req, notion_token, publish_fn))
     graph.add_edge(START, "collect")
     graph.add_edge("collect", "build")

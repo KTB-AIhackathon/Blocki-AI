@@ -12,7 +12,7 @@ from app.contracts import (
     ProfileFields,
 )
 from app.pipelines import common
-from app.pipelines.portfolio import sections, team
+from app.pipelines.portfolio import briefs, sections, team
 
 KIND = "portfolio"
 
@@ -36,6 +36,7 @@ async def build(
     if missing:
         return common.blocked(job, KIND, missing, template_ref)
 
+    sheets = briefs.render_briefs(evidence)
     _selected, dossiers, intro = await team.run_team(evidence, llm, deadline=deadline)
     view = team.view_of(evidence, _selected)
     summary_md, summary_refs = sections.summary(view, intro)
@@ -66,7 +67,7 @@ async def build(
         *learning_refs,
     ]
     complete = snapshot.complete and evidence.complete and not unresolved
-    return ArtifactProposal(
+    proposal = ArtifactProposal(
         proposal_id="",
         job_id=job.job_id,
         status="proposed" if complete else "partial",
@@ -77,6 +78,8 @@ async def build(
         unresolved_fields=unresolved,
         warnings=list(evidence.warnings),
     )
+    proposal._publish_briefs = sheets
+    return proposal
 
 
 def _unresolved(fields: ProfileFields, skills_md: str, projects_md: str) -> list[str]:
