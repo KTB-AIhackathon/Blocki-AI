@@ -64,7 +64,7 @@ async def portfolio_with(llm: Any | None):
 async def test_grounded_sentences_reach_the_document() -> None:
     llm = FakeLLM(
         {
-            "sentences": [
+            "intro": [
                 {"text": "결제 도메인 백엔드를 맡았습니다.", "evidence_ids": ["repo:acme/demo"]}
             ]
         }
@@ -79,7 +79,7 @@ async def test_grounded_sentences_reach_the_document() -> None:
 async def test_sentences_without_real_evidence_are_dropped() -> None:
     llm = FakeLLM(
         {
-            "sentences": [
+            "intro": [
                 {"text": "쿠버네티스 클러스터를 운영했습니다.", "evidence_ids": ["repo:made/up"]},
                 {"text": "근거 없는 문장", "evidence_ids": []},
             ]

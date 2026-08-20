@@ -18,14 +18,19 @@ from app.pipelines import common
 from app.pipelines.portfolio import sections
 
 KIND = "portfolio"
+MAX_FEATURED = 3
 INSTRUCTION = (
-    "아래 개발자의 GitHub 활동 근거만 보고 포트폴리오 자기소개를 2~3문장으로 써라. "
-    "각 문장은 근거 id를 함께 반환한다. 근거가 부족하면 문장 수를 줄인다."
+    "아래 개발자의 GitHub 활동 근거만 보고 "
+    "소개 2~3문장과 선정된 프로젝트별 기여 요약 1문장을 써라. "
+    "소개는 intro, 프로젝트 요약은 projects 에 넣는다. "
+    "프로젝트 문장은 해당 repo:{owner/name} id를 evidence_ids에 포함한다. "
+    "근거가 부족하면 문장 수를 줄인다. 없는 사실을 만들지 않는다."
 )
 
 
-class _Intro(BaseModel):
-    sentences: list[guard.GroundedText] = Field(default_factory=list)
+class _Draft(BaseModel):
+    intro: list[guard.GroundedText] = Field(default_factory=list)
+    projects: list[guard.GroundedText] = Field(default_factory=list)
 
 
 async def build(
@@ -46,11 +51,12 @@ async def build(
     if missing:
         return common.blocked(job, KIND, missing, template_ref)
 
-    intro = await _intro_lines(evidence, llm)
-    summary_md, summary_refs = sections.summary(evidence, intro)
-    stats_md, stats_refs = sections.stats(evidence)
-    skills_md, skills_refs = sections.skills(evidence)
-    projects_md, projects_refs = sections.projects(evidence)
+    view = _featured(evidence)
+    intro, summaries = await _draft(view, llm)
+    summary_md, summary_refs = sections.summary(view, intro)
+    stats_md, stats_refs = sections.stats(view)
+    skills_md, skills_refs = sections.skills(view)
+    projects_md, projects_refs = sections.projects(view, summaries)
 
     body = render.render(
         KIND,
@@ -83,14 +89,40 @@ async def build(
     )
 
 
-async def _intro_lines(evidence: Evidence, llm: Any | None) -> list[str]:
+def _featured(evidence: Evidence) -> Evidence:
+    chosen = evidence.projects[:MAX_FEATURED]
+    if len(chosen) == len(evidence.projects):
+        return evidence
+    starts = [p.started_at for p in chosen if p.started_at]
+    ends = [p.ended_at for p in chosen if p.ended_at]
+    return evidence.model_copy(
+        update={
+            "projects": chosen,
+            "my_commits": sum(p.my_commits for p in chosen),
+            "period_start": min(starts) if starts else evidence.period_start,
+            "period_end": max(ends) if ends else evidence.period_end,
+        }
+    )
+
+
+async def _draft(
+    evidence: Evidence, llm: Any | None
+) -> tuple[list[guard.GroundedText], dict[str, guard.GroundedText]]:
     if evidence.is_empty():
-        return []
-    result = await guard.complete(_Intro, instruction=INSTRUCTION, evidence=evidence, llm=llm)
+        return [], {}
+    result = await guard.complete(_Draft, instruction=INSTRUCTION, evidence=evidence, llm=llm)
     if result is None:
-        return []
-    kept = guard.keep_grounded(result.sentences, evidence.ids())
-    return [item.text for item in kept]
+        return [], {}
+    allowed = evidence.ids()
+    intro = guard.keep_grounded(result.intro, allowed)
+    project_ids = {p.id for p in evidence.projects}
+    summaries: dict[str, guard.GroundedText] = {}
+    for item in guard.keep_grounded(result.projects, allowed):
+        repo_ids = [sid for sid in item.evidence_ids if sid in project_ids]
+        if len(repo_ids) != 1:
+            continue
+        summaries[repo_ids[0]] = item
+    return intro, summaries
 
 
 def _unresolved(

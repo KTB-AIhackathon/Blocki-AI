@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from app.analyze import skills as skill_analysis
 from app.contracts import Evidence, EvidenceRef, ProjectFacts
+from app.llm.guard import GroundedText
 from app.pipelines import common
 
 Section = tuple[str, list[EvidenceRef]]
@@ -11,28 +12,29 @@ Section = tuple[str, list[EvidenceRef]]
 TOP_SKILLS_IN_SUMMARY = 4
 
 
-def summary(evidence: Evidence, extra_lines: list[str] | None = None) -> Section:
+def summary(evidence: Evidence, extra: list[GroundedText] | None = None) -> Section:
     if evidence.is_empty():
         return "", []
-    refs: list[EvidenceRef] = []
-    lines: list[str] = list(extra_lines or [])
+    extras = [item for item in (extra or []) if item.text.strip()]
+    if extras:
+        lines = [item.text.strip() for item in extras]
+        return "\n\n".join(lines), _refs_from_grounded("summary_md", extras, evidence)
 
-    if not lines:
-        top = [s for s in evidence.skills if s.category in ("language", "framework")][
-            :TOP_SKILLS_IN_SUMMARY
-        ]
-        if top:
-            names = ", ".join(s.name for s in top)
-            lines.append(f"주로 사용하는 기술은 {names} 입니다.")
-            refs.extend(common.skill_ref("summary_md", s) for s in top)
-        span = common.period(evidence.period_start, evidence.period_end)
-        if span and evidence.projects:
-            lines.append(
-                f"{span} 동안 프로젝트 {len(evidence.projects)}개에 "
-                f"커밋 {evidence.my_commits}개를 남겼습니다."
-            )
-            refs.extend(common.project_ref("summary_md", p) for p in evidence.projects)
-    else:
+    refs: list[EvidenceRef] = []
+    lines: list[str] = []
+    top = [s for s in evidence.skills if s.category in ("language", "framework")][
+        :TOP_SKILLS_IN_SUMMARY
+    ]
+    if top:
+        names = ", ".join(s.name for s in top)
+        lines.append(f"주로 사용하는 기술은 {names} 입니다.")
+        refs.extend(common.skill_ref("summary_md", s) for s in top)
+    span = common.period(evidence.period_start, evidence.period_end)
+    if span and evidence.projects:
+        lines.append(
+            f"{span} 동안 프로젝트 {len(evidence.projects)}개에 "
+            f"커밋 {evidence.my_commits}개를 남겼습니다."
+        )
         refs.extend(common.project_ref("summary_md", p) for p in evidence.projects)
 
     return "\n\n".join(lines), refs
@@ -79,22 +81,26 @@ def skills(evidence: Evidence) -> Section:
     return "\n\n".join(blocks), refs
 
 
-def projects(evidence: Evidence) -> Section:
+def projects(
+    evidence: Evidence, summaries: dict[str, GroundedText] | None = None
+) -> Section:
     if not evidence.projects:
         return "", []
     blocks: list[str] = []
     refs: list[EvidenceRef] = []
     for facts in evidence.projects:
-        block, block_refs = _project_block(facts)
+        block, block_refs = _project_block(facts, (summaries or {}).get(facts.id))
         blocks.append(block)
         refs.extend(block_refs)
     return "\n\n".join(blocks), refs
 
 
-def _project_block(facts: ProjectFacts) -> Section:
+def _project_block(facts: ProjectFacts, summary: GroundedText | None = None) -> Section:
     refs = [common.project_ref("projects_md", facts)]
     parts = [f"### {facts.repo}", ""]
-    if facts.description:
+    if summary is not None:
+        parts.extend([summary.text.strip(), ""])
+    elif facts.description:
         parts.extend([f"> {facts.description}", ""])
 
     meta: list[str] = []
@@ -113,9 +119,33 @@ def _project_block(facts: ProjectFacts) -> Section:
         meta.append(f"- 저장소: {facts.url}")
     parts.extend(meta)
 
-    if facts.highlights:
+    if summary is None and facts.highlights:
         parts.extend(["", "**주요 작업**", ""])
         for highlight in facts.highlights:
             parts.append(f"- {highlight.subject} (`{highlight.sha[:7]}`)")
             refs.append(common.commit_ref("projects_md", highlight))
     return "\n".join(parts).rstrip(), refs
+
+
+def _refs_from_grounded(
+    field: str, items: list[GroundedText], evidence: Evidence
+) -> list[EvidenceRef]:
+    by_id: dict[str, EvidenceRef] = {}
+    for project in evidence.projects:
+        by_id[project.id] = common.project_ref(field, project)
+        for highlight in project.highlights:
+            by_id[highlight.id] = common.commit_ref(field, highlight)
+        for skill in project.languages:
+            by_id[skill.id] = common.skill_ref(field, skill)
+    for skill in evidence.skills:
+        by_id.setdefault(skill.id, common.skill_ref(field, skill))
+    refs: list[EvidenceRef] = []
+    seen: set[str] = set()
+    for item in items:
+        for source_id in item.evidence_ids:
+            ref = by_id.get(source_id)
+            if ref is None or source_id in seen:
+                continue
+            seen.add(source_id)
+            refs.append(ref)
+    return refs
