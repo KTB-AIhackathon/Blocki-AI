@@ -21,6 +21,7 @@ from app.contracts.evidence import (
     ProjectFacts,
     SkillCategory,
     SkillFact,
+    TilFact,
     ViewerIdentity,
     WorkItem,
 )
@@ -74,6 +75,7 @@ from app.contracts.readme import (
     ReadmeTarget,
     is_allowed_readme_path,
 )
+from app.contracts.notion import NotionSnapshot, TilEntry
 
 __all__ = [
     "ARTIFACT_TITLES",
@@ -125,6 +127,9 @@ __all__ = [
     "SkillFact",
     "SnapshotSummary",
     "TemplateRef",
+    "TilEntry",
+    "TilFact",
+    "NotionSnapshot",
     "ViewerIdentity",
     "WorkItem",
     "action_digest_of",

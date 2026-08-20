@@ -13,6 +13,7 @@ from typing import Any
 from uuid import uuid4
 
 from app.analyze import analyze
+from app.analyze.til import facts_of as til_facts_of
 from app.contracts import (
     ArtifactKind,
     ArtifactProposal,
@@ -21,6 +22,7 @@ from app.contracts import (
     GitHubSnapshot,
     JobError,
     JobRequest,
+    NotionSnapshot,
     fill_proposal_digests,
 )
 from app.pipelines import portfolio, progress, readme, resume
@@ -94,12 +96,27 @@ def resolve(job_type: str) -> Pipeline | None:
     return REGISTRY.get(job_type)
 
 
-def evidence_for(pipeline: Pipeline, snapshot: GitHubSnapshot) -> Evidence:
+def evidence_for(
+    pipeline: Pipeline,
+    snapshot: GitHubSnapshot,
+    *,
+    til: NotionSnapshot | None = None,
+) -> Evidence:
     spec = pipeline.evidence
     if spec is None:
-        return Evidence(complete=snapshot.complete)
+        if til is None:
+            return Evidence(complete=snapshot.complete)
+        base = Evidence(complete=snapshot.complete)
+        return base.model_copy(
+            update={
+                "til": til_facts_of(til),
+                "complete": base.complete and til.complete,
+                "warnings": [*base.warnings, *til.warnings],
+            }
+        )
     return analyze(
         snapshot,
+        til=til,
         max_projects=spec.max_projects,
         max_highlights=spec.max_highlights,
         require_own_commits=spec.require_own_commits,
@@ -110,6 +127,7 @@ async def run(
     job: JobRequest,
     snapshot: GitHubSnapshot,
     *,
+    til: NotionSnapshot | None = None,
     llm: Any | None = None,
     deadline: float | None = None,
 ) -> ArtifactProposal:
@@ -127,7 +145,7 @@ async def run(
             ),
         )
     else:
-        evidence = evidence_for(pipeline, snapshot)
+        evidence = evidence_for(pipeline, snapshot, til=til)
         if pipeline.kind == "portfolio":
             proposal = await pipeline.build(
                 job, snapshot, evidence, llm=llm, deadline=deadline

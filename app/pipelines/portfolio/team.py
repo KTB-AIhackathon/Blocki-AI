@@ -20,7 +20,7 @@ PUBLISH_RESERVE = 20.0
 SELECT_FLOOR = 12.0
 FILL_FLOOR = 12.0
 WRITE_FLOOR = 15.0
-WORK_PREFIXES = ("commit:", "pr:", "issue:")
+WORK_PREFIXES = ("commit:", "pr:", "issue:", "til:")
 
 SELECT_INSTRUCTION = (
     "폴더 사실만 보고 포트폴리오에 넣을 저장소를 고른다. "
@@ -37,7 +37,7 @@ PITCH_INSTRUCTION = (
 WORK_INSTRUCTION = (
     "FORM은 빈 카드의 주요 작업 칸이다. MATERIALS의 작업 제목만 보고 "
     "화면에 넣을 id를 work_ids에 최대 3개 고른다. "
-    "문장을 만들지 않는다. commit·pr·issue id만 넣는다."
+    "문장을 만들지 않는다. commit·pr·issue·til id만 넣는다."
 )
 WRITE_INSTRUCTION = (
     "FORM은 소개 칸이다. 고른 카드의 한 줄과 작업 제목만 보고 intro를 한국어로 쓴다. "
@@ -119,6 +119,10 @@ def work_catalog(project: ProjectFacts) -> list[dict[str, str]]:
         title = (item.title or "").strip()
         if title:
             items.append({"id": item.id, "title": title})
+    for item in project.til:
+        title = (item.title or "").strip()
+        if title:
+            items.append({"id": item.id, "title": title})
     return items
 
 
@@ -168,6 +172,10 @@ def project_digest(project: ProjectFacts, evidence: Evidence) -> dict[str, Any]:
         ],
         "pull_requests": [{"id": item.id, "title": item.title} for item in project.pull_requests],
         "issues": [{"id": item.id, "title": item.title} for item in project.issues],
+        "til": [
+            {"id": item.id, "title": item.title, "date": item.date.isoformat()}
+            for item in project.til
+        ],
     }
 
 

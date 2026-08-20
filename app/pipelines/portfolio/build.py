@@ -41,6 +41,7 @@ async def build(
     summary_md, summary_refs = sections.summary(view, intro)
     skills_md, skills_refs = sections.skills(view)
     projects_md, projects_refs = sections.projects(view, dossiers)
+    learning_md, learning_refs = sections.learning(view)
 
     body = render.render(
         KIND,
@@ -51,13 +52,19 @@ async def build(
             "summary_md": summary_md,
             "skills_md": skills_md,
             "projects_md": projects_md,
+            "learning_md": learning_md,
             "experience_md": fields.experience_md,
             "education_md": fields.education_md,
         },
     )
 
     unresolved = _unresolved(fields, skills_md, projects_md)
-    refs: list[EvidenceRef] = [*summary_refs, *skills_refs, *projects_refs]
+    refs: list[EvidenceRef] = [
+        *summary_refs,
+        *skills_refs,
+        *projects_refs,
+        *learning_refs,
+    ]
     complete = snapshot.complete and evidence.complete and not unresolved
     return ArtifactProposal(
         proposal_id="",

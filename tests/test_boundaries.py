@@ -22,6 +22,7 @@ FORBIDDEN_IMPORTS: dict[str, tuple[str, ...]] = {
     "publish": ("app.collect", "app.analyze", "app.pipelines", "app.api"),
     "execute": ("app.collect", "app.analyze", "app.pipelines", "app.publish", "app.api"),
     "llm": ("app.collect", "app.pipelines", "app.publish", "app.api"),
+    "graph": ("app.api",),
     "contracts": ("app.collect", "app.analyze", "app.pipelines", "app.publish", "app.api"),
 }
 

@@ -8,17 +8,19 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from app.analyze import projects, repos, skills
-from app.contracts import Evidence, GitHubSnapshot, ViewerIdentity, utcnow
+from app.analyze import join, projects, repos, skills
+from app.analyze.til import facts_of as til_facts_of
+from app.contracts import Evidence, GitHubSnapshot, NotionSnapshot, ViewerIdentity, utcnow
 
-__all__ = ["analyze", "projects", "repos", "skills"]
+__all__ = ["analyze", "join", "projects", "repos", "skills"]
 
-DEFAULT_MAX_PROJECTS = 5
+DEFAULT_MAX_PROJECTS = 3
 
 
 def analyze(
     snapshot: GitHubSnapshot,
     *,
+    til: NotionSnapshot | None = None,
     max_projects: int = DEFAULT_MAX_PROJECTS,
     require_own_commits: bool = True,
     max_highlights: int = 5,
@@ -33,9 +35,15 @@ def analyze(
         projects.facts_of(repo, viewer, now=moment, max_highlights=max_highlights)
         for repo in usable
     ]
+    til_facts = til_facts_of(til) if til is not None else []
+    if til is not None:
+        join.attach(facts, til_facts)
+    for facts_of_repo, repo in zip(facts, usable):
+        facts_of_repo.score = repos._score(facts_of_repo, repo, now=moment)
     selected, warnings = repos.select(
         facts, limit=max_projects, require_own_commits=require_own_commits
     )
+    unmatched_til = join.attach(selected, til_facts) if til is not None else []
     if excluded:
         warnings.append(f"fork/archived 제외: {', '.join(sorted(excluded))}")
     if viewer.login is None and any(f.total_commits for f in facts):
@@ -48,7 +56,7 @@ def analyze(
 
     starts = [f.started_at for f in selected if f.started_at]
     ends = [f.ended_at for f in selected if f.ended_at]
-    return Evidence(
+    evidence = Evidence(
         viewer=viewer,
         projects=selected,
         skills=catalogue,
@@ -57,7 +65,14 @@ def analyze(
         my_commits=sum(f.my_commits for f in selected),
         complete=snapshot.complete,
         warnings=[*snapshot.warnings, *warnings],
+        til=til_facts,
+        unmatched_til=unmatched_til,
     )
+    if til is None:
+        return evidence
+    evidence.complete = evidence.complete and til.complete
+    evidence.warnings.extend(til.warnings)
+    return evidence
 
 
 def _viewer(snapshot: GitHubSnapshot) -> ViewerIdentity:

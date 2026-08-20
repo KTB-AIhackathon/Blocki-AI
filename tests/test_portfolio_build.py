@@ -279,7 +279,8 @@ async def test_skills_list_featured_repos_not_percents() -> None:
     )
     body = proposal.body_markdown
 
-    assert "100%" not in body
+    skills_section = body.split("## 기술", 1)[1].split("## 프로젝트", 1)[0]
+    assert "100%" not in skills_section
     assert "- **Languages**: Python" in body
     assert "- **Frameworks**: FastAPI" in body
     assert "Redis" not in body

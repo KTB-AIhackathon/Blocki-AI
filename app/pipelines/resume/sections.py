@@ -40,6 +40,17 @@ def projects(evidence: Evidence) -> Section:
         line, line_refs = _project_line(facts, evidence.skills)
         lines.append(line)
         refs.extend(line_refs)
+    return "\n\n".join(lines), refs
+
+
+def learning(evidence: Evidence) -> Section:
+    if not evidence.unmatched_til:
+        return "", []
+    lines = ["## 📝 그 외 학습 기록", ""]
+    refs: list[EvidenceRef] = []
+    for item in evidence.unmatched_til:
+        lines.append(f"- {item.date:%Y-%m-%d} · {item.title}")
+        refs.append(common.til_ref("learning_md", item))
     return "\n".join(lines), refs
 
 
@@ -60,12 +71,21 @@ def _project_line(facts: ProjectFacts, catalogue: list[SkillFact]) -> Section:
         )
     for highlight in shown:
         refs.append(common.commit_ref("projects_md", highlight))
+    for item in facts.til:
+        refs.append(common.til_ref("projects_md", item))
 
     names = ", ".join(skill.name for skill in stack)
+    line = f"- {title}"
     if work and names:
-        return f"- {title} — {work} `{names}`", refs
-    if work:
-        return f"- {title} — {work}", refs
-    if names:
-        return f"- {title} `{names}`", refs
-    return f"- {title}", refs
+        line += f" — {work} `{names}`"
+    elif work:
+        line += f" — {work}"
+    elif names:
+        line += f" `{names}`"
+    line += f"\n- 기여: {common.contribution(facts)}"
+    if facts.til:
+        line += "\n\n**배운 것**\n\n"
+        line += "\n".join(
+            f"- {item.date:%Y-%m-%d} · {item.title}" for item in facts.til
+        )
+    return line, refs

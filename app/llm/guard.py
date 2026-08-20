@@ -95,7 +95,7 @@ def keep_grounded(items: Sequence[GroundedText], allowed: set[str]) -> list[Grou
     return kept
 
 
-WORK_PREFIXES = ("commit:", "pr:", "issue:")
+WORK_PREFIXES = ("commit:", "pr:", "issue:", "til:")
 
 
 def keep_work(items: Sequence[GroundedText], allowed: set[str]) -> list[GroundedText]:
@@ -109,7 +109,7 @@ def keep_work(items: Sequence[GroundedText], allowed: set[str]) -> list[Grounded
 
 def _digest(evidence: Evidence) -> dict[str, Any]:
     """Facts only. Raw snapshots never reach the model."""
-    return {
+    payload = {
         "viewer": evidence.viewer.login,
         "period": {
             "start": evidence.period_start.date().isoformat() if evidence.period_start else None,
@@ -147,3 +147,16 @@ def _digest(evidence: Evidence) -> dict[str, Any]:
             for p in evidence.projects
         ],
     }
+    if evidence.til:
+        payload["til"] = [
+            {
+                "id": item.id,
+                "date": item.date.isoformat(),
+                "title": item.title,
+                "body_markdown": item.body_markdown,
+                "page_id": item.page_id,
+                "tags": item.tags,
+            }
+            for item in evidence.til
+        ]
+    return payload

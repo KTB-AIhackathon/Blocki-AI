@@ -22,6 +22,7 @@ PLACEHOLDERS = (
     "stats_md",
     "skills_md",
     "projects_md",
+    "learning_md",
     "experience_md",
     "education_md",
 )

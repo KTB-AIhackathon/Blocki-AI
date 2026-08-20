@@ -14,6 +14,7 @@ from app.contracts import (
     ProfileFields,
     ProjectFacts,
     SkillFact,
+    TilFact,
     TemplateRef,
     WorkItem,
 )
@@ -82,6 +83,12 @@ def period(start: datetime | None, end: datetime | None) -> str:
     return f"{start.strftime('%Y.%m')} ~ {end.strftime('%Y.%m')}"
 
 
+def duration_months(start: datetime | None, end: datetime | None) -> int | None:
+    if start is None or end is None:
+        return None
+    return max((end.year - start.year) * 12 + end.month - start.month + 1, 1)
+
+
 def project_ref(field: str, project: ProjectFacts) -> EvidenceRef:
     return EvidenceRef(
         field=field, repo=project.repo, source_type="repo", source_id=project.id
@@ -92,6 +99,10 @@ def commit_ref(field: str, commit: CommitFact) -> EvidenceRef:
     return EvidenceRef(
         field=field, repo=commit.repo, source_type="commit", source_id=commit.id
     )
+
+
+def til_ref(field: str, til: TilFact) -> EvidenceRef:
+    return EvidenceRef(field=field, repo="", source_type="til", source_id=til.id)
 
 
 def work_ref(field: str, item: WorkItem) -> EvidenceRef:
@@ -118,6 +129,22 @@ def scale(project: ProjectFacts) -> str:
     if project.closed_issues:
         parts.append(f"해결한 이슈 {project.closed_issues}개")
     return ", ".join(parts)
+
+
+def contribution(project: ProjectFacts) -> str:
+    if project.total_commits <= 0 or project.total_commits < project.my_commits:
+        result = f"커밋 {project.my_commits}개"
+    else:
+        percentage = project.my_commits / project.total_commits * 100
+        result = (
+            f"커밋 {project.my_commits}개 "
+            f"(전체 {project.total_commits}개 중 {percentage:.0f}%)"
+        )
+    if project.merged_prs:
+        result += f", 머지된 PR {project.merged_prs}개"
+    if project.closed_issues:
+        result += f", 해결한 이슈 {project.closed_issues}개"
+    return result
 
 
 def team_label(project: ProjectFacts) -> str:

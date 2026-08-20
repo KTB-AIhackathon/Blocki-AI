@@ -58,6 +58,17 @@ def projects(evidence: Evidence, dossiers: list[Dossier] | None = None) -> Secti
     return "\n\n".join(blocks), refs
 
 
+def learning(evidence: Evidence) -> Section:
+    if not evidence.unmatched_til:
+        return "", []
+    lines = ["## 📝 그 외 학습 기록", ""]
+    refs: list[EvidenceRef] = []
+    for item in evidence.unmatched_til:
+        lines.append(f"- {item.date:%Y-%m-%d} · {item.title}")
+        refs.append(common.til_ref("learning_md", item))
+    return "\n".join(lines), refs
+
+
 def _project_block(
     facts: ProjectFacts,
     featured: list[str],
@@ -77,6 +88,16 @@ def _project_block(
                     _refs_from_grounded("projects_md", [item], _evidence_for(facts, catalogue))
                 )
                 parts.append("")
+
+    meta: list[str] = []
+    span = common.period(facts.started_at, facts.ended_at)
+    if span:
+        months = common.duration_months(facts.started_at, facts.ended_at)
+        suffix = f" ({months}개월)" if months is not None else ""
+        meta.append(f"- 기간: {span}{suffix}")
+    meta.append(f"- 구성: {common.team_label(facts)}")
+    meta.append(f"- 기여: {common.contribution(facts)}")
+    parts.extend(meta)
 
     stack = [skill for skill in catalogue if facts.repo in skill.repos]
     if stack:
@@ -105,6 +126,11 @@ def _project_block(
             for highlight in shown:
                 parts.append(f"- {highlight.subject.strip()}")
                 refs.append(common.commit_ref("projects_md", highlight))
+    if facts.til:
+        parts.extend(["", "**배운 것**", ""])
+        for item in facts.til:
+            parts.append(f"- {item.date:%Y-%m-%d} · {item.title}")
+            refs.append(common.til_ref("projects_md", item))
     return "\n".join(parts).rstrip(), refs
 
 
@@ -120,6 +146,10 @@ def _work_titles(
         title = (item.title or "").strip()
         if title:
             by_id[item.id] = (title, common.work_ref("projects_md", item))
+    for item in facts.til:
+        title = (item.title or "").strip()
+        if title:
+            by_id[item.id] = (title, common.til_ref("projects_md", item))
     out: list[tuple[str, EvidenceRef]] = []
     for source_id in work_ids:
         found = by_id.get(source_id)
@@ -161,6 +191,8 @@ def _refs_from_grounded(
             by_id[item.id] = common.work_ref(field, item)
         for item in project.issues:
             by_id[item.id] = common.work_ref(field, item)
+        for item in project.til:
+            by_id[item.id] = common.til_ref(field, item)
         for skill in project.languages:
             by_id[skill.id] = common.skill_ref(field, skill)
     for skill in evidence.skills:

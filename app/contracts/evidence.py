@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 from typing import Literal
 
 from pydantic import BaseModel, Field
@@ -58,6 +58,15 @@ class WorkItem(BaseModel):
     source_type: Literal["pr", "issue"]
 
 
+class TilFact(BaseModel):
+    id: str
+    date: date
+    title: str
+    body_markdown: str
+    page_id: str
+    tags: list[str] = Field(default_factory=list)
+
+
 class ProjectFacts(BaseModel):
     id: str
     repo: str
@@ -75,6 +84,7 @@ class ProjectFacts(BaseModel):
     highlights: list[CommitFact] = Field(default_factory=list)
     pull_requests: list[WorkItem] = Field(default_factory=list)
     issues: list[WorkItem] = Field(default_factory=list)
+    til: list[TilFact] = Field(default_factory=list)
     score: float = 0.0
 
     @property
@@ -93,6 +103,14 @@ class Evidence(BaseModel):
     my_commits: int = 0
     complete: bool = True
     warnings: list[str] = Field(default_factory=list)
+    til: list[TilFact] = Field(default_factory=list)
+    unmatched_til: list[TilFact] = Field(default_factory=list)
+
+    def model_dump(self, *args, **kwargs):
+        dumped = super().model_dump(*args, **kwargs)
+        if not self.unmatched_til:
+            dumped.pop("unmatched_til", None)
+        return dumped
 
     def ids(self) -> set[str]:
         found = {p.id for p in self.projects}
@@ -102,7 +120,10 @@ class Evidence(BaseModel):
             found |= {s.id for s in project.languages}
             found |= {item.id for item in project.pull_requests}
             found |= {item.id for item in project.issues}
+            found |= {item.id for item in project.til}
+        found |= {item.id for item in self.til}
+        found |= {item.id for item in self.unmatched_til}
         return found
 
     def is_empty(self) -> bool:
-        return not self.projects and not self.skills
+        return not self.projects and not self.skills and not self.til
