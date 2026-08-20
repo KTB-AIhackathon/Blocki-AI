@@ -94,6 +94,8 @@ class TilFact(BaseModel):
     learned: str = ""
     retro: str = ""
     work_repo: str = ""
+    #: 기본 정보 표의 프로젝트 이름. 이모지와 장식이 섞여 오므로 조인할 때 정규화한다.
+    project_name: str = ""
 
     def field_ids(self) -> set[str]:
         fields = ("goal", "problem", "attempt", "result", "metric", "learned", "retro", "work_repo")

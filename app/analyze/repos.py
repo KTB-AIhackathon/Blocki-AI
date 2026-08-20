@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+import os
 import re
 from datetime import datetime
 
@@ -14,8 +15,20 @@ _AWARD = re.compile(r"수상|우수상|대상|최우수|입상|1위|2위|award|w
 _NON_PROJECT_PARTS = {"study", "til", "practice", "tutorial", "notes", "log"}
 
 
+def excluded_repos() -> set[str]:
+    """`owner/name` the operator never wants in a document, comma separated.
+
+    Some repositories are dead, private-by-intent or simply not the person's
+    work, and no signal in the data says so. Unset means exclude nothing.
+    """
+    raw = os.environ.get("BLOCKI_EXCLUDE_REPOS", "")
+    return {part.strip().casefold() for part in raw.split(",") if part.strip()}
+
+
 def eligible(repo: RepoActivity) -> bool:
     """Forks and archived repositories are not evidence of authored work."""
+    if repo.full_name.casefold() in excluded_repos():
+        return False
     return not repo.fork and not repo.archived
 
 
