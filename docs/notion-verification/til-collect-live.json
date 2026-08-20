@@ -1,0 +1,127 @@
+{
+  "entries": [
+    {
+      "week_label": "8월 셋째주, 3주차",
+      "week_topic": "Notion MCP",
+      "date": "26.08.19",
+      "title": "TIL 작성",
+      "detail_url": "https://app.notion.com/p/3c10ffe9306d81c19a3fcdd086d30ede",
+      "detail": {
+        "date": "2026-08-19",
+        "scrum": [
+          "학습 목표 1 : 아침 스크럼에 작성한 내용 붙여넣기",
+          "학습 목표 2",
+          "학습 목표 3"
+        ],
+        "learned": [
+          {
+            "topic": "주제 1",
+            "description": "주제에 대한 설명",
+            "details": [
+              "상세 내용 1",
+              "상세 내용 2",
+              "상세 내용 3"
+            ]
+          },
+          {
+            "topic": "주제 2",
+            "description": "주제에 대한 설명",
+            "details": [
+              "상세 내용 1",
+              "상세 내용 2"
+            ]
+          }
+        ],
+        "challenges": [
+          {
+            "title": "도전 과제에 대한 설명 및 해결 방법",
+            "project": "Blocki-Notion",
+            "result": "페이지 생성 왕복 3회 → 1회"
+          },
+          {
+            "title": "도전 과제에 대한 설명 및 해결 방법",
+            "project": null,
+            "result": null
+          }
+        ],
+        "retrospective": [
+          "오늘의 학습 경험에 대한 자유로운 생각이나 느낀 점을 기록합니다.",
+          "성공적인 점, 개선해야 할 점, 새롭게 시도하고 싶은 방법 등을 포함할 수 있습니다."
+        ],
+        "references": [
+          {
+            "title": "링크 제목",
+            "url": "URL"
+          },
+          {
+            "title": "링크 제목",
+            "url": "URL"
+          }
+        ],
+        "unparsed_sections": []
+      }
+    },
+    {
+      "week_label": "8월 셋째주, 3주차",
+      "week_topic": "Notion MCP",
+      "date": "26.08.18",
+      "title": "TIL 작성",
+      "detail_url": "https://app.notion.com/p/3c10ffe9306d81e598edfd67eff74d38",
+      "detail": {
+        "date": "2026-08-18",
+        "scrum": [
+          "학습 목표 1 : 아침 스크럼에 작성한 내용 붙여넣기",
+          "학습 목표 2",
+          "학습 목표 3"
+        ],
+        "learned": [
+          {
+            "topic": "주제 1",
+            "description": "주제에 대한 설명",
+            "details": [
+              "상세 내용 1",
+              "상세 내용 2",
+              "상세 내용 3"
+            ]
+          },
+          {
+            "topic": "주제 2",
+            "description": "주제에 대한 설명",
+            "details": [
+              "상세 내용 1",
+              "상세 내용 2"
+            ]
+          }
+        ],
+        "challenges": [
+          {
+            "title": "도전 과제에 대한 설명 및 해결 방법",
+            "project": "Blocki-AI",
+            "result": "TIL 파싱 실패율 100% → 0%"
+          },
+          {
+            "title": "도전 과제에 대한 설명 및 해결 방법",
+            "project": null,
+            "result": null
+          }
+        ],
+        "retrospective": [
+          "오늘의 학습 경험에 대한 자유로운 생각이나 느낀 점을 기록합니다.",
+          "성공적인 점, 개선해야 할 점, 새롭게 시도하고 싶은 방법 등을 포함할 수 있습니다."
+        ],
+        "references": [
+          {
+            "title": "링크 제목",
+            "url": "URL"
+          },
+          {
+            "title": "링크 제목",
+            "url": "URL"
+          }
+        ],
+        "unparsed_sections": []
+      }
+    }
+  ],
+  "errors": []
+}

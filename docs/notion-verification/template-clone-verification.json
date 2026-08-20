@@ -1,0 +1,14 @@
+{
+  "source": "notion_mcp",
+  "tool_used": "notion-create-pages",
+  "created_page_id": "3c10ffe9-306d-8106-a9d6-f65855403b39",
+  "created_page_url": "https://app.notion.com/p/3c10ffe9306d8106a9d6f65855403b39",
+  "source_counts": {"code_blocks": 4, "table_rows": 38, "todos": 7, "headings": 80},
+  "fetched_counts": {"code_blocks": 4, "table_rows": 38, "todos": 7, "headings": 80},
+  "emoji_headings_survived": true,
+  "fidelity": "exact",
+  "notes": [
+    "Markdown pipe tables become real Notion table blocks; notion-fetch returns them as <table>/<tr>/<td>, not pipes. Content is intact — the first count of 0 was a counting artifact of grepping for '|'.",
+    "Code fences, to-do checkboxes, heading levels and emoji all survived unchanged."
+  ]
+}
