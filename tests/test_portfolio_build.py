@@ -398,7 +398,7 @@ async def test_curator_order_replaces_score_order() -> None:
     assert "### gamma" not in proposal.body_markdown
     assert "cards" not in proposal.model_dump()
     assert "selected_ids" not in proposal.model_dump()
-    assert "> test" in proposal.body_markdown
+    assert "test" in proposal.body_markdown.split("## 🔍 이 프로젝트를 고른 이유", 1)[1]
 
 
 async def test_curator_may_keep_two_projects() -> None:

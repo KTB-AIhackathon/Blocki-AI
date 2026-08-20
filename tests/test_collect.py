@@ -382,3 +382,9 @@ def test_parse_handles_mcp_text_blocks() -> None:
 def test_parse_survives_malformed_timestamps() -> None:
     rows = parse.commits([{"sha": "aaa", "message": "x", "committed_at": "not-a-date"}])
     assert rows[0].committed_at is None
+
+
+def test_entry_name_reads_github_contents_name_not_the_dict() -> None:
+    assert parse.entry_name({"name": ".gitignore", "path": ".gitignore"}) == ".gitignore"
+    assert parse.entry_name("Dockerfile") == "Dockerfile"
+    assert parse.entry_name(None) == ""

@@ -156,7 +156,11 @@ async def _collect_repo(
         html_url=parse.text_of(meta.get("html_url")),
         topics=[str(t) for t in (meta.get("topics") or []) if t is not None],
         languages=parse.languages(meta.get("languages")),
-        manifest_files=[str(p) for p in (meta.get("manifest_files") or []) if p],
+        manifest_files=[
+            name
+            for item in (meta.get("manifest_files") or [])
+            if (name := parse.entry_name(item))
+        ],
         fork=bool(meta.get("fork")),
         archived=bool(meta.get("archived")),
         stars=parse.as_int(meta.get("stars")),

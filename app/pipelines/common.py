@@ -202,7 +202,7 @@ def selection(
     }
     lines: list[str] = []
     if evidence.selection_reason.strip():
-        lines.extend([f"> {evidence.selection_reason.strip()}", ""])
+        lines.extend([evidence.selection_reason.strip(), ""])
     lines.extend(["| 저장소 | 점수 | 주요 근거 |", "|---|---:|---|"])
     refs: list[EvidenceRef] = []
     for project in sorted(candidates, key=lambda item: (-item.score, item.repo)):
@@ -223,8 +223,14 @@ def _selection_evidence(project: ProjectFacts, dropped: bool) -> str:
     facts: list[str] = []
     if project.my_commits:
         facts.append(f"커밋 {project.my_commits}")
+    if project.merged_prs:
+        facts.append(f"PR {project.merged_prs}")
+    if project.closed_issues:
+        facts.append(f"이슈 {project.closed_issues}")
     if project.til:
         facts.append(f"TIL {len(project.til)}건")
+    if project.topics:
+        facts.append(project.topics[0])
     if breakdown.get("team", 0) > 0:
         facts.append(f"팀 {project.contributors}명")
     if breakdown.get("award", 0) > 0:
