@@ -1,10 +1,20 @@
 from __future__ import annotations
 
+import logging
+
 import pytest
 from fastapi.testclient import TestClient
 
 from app.api.jobs import handle_job
-from app.contracts import DocumentSpec, JobRequest, NotionSnapshot, ProfileFields, TilEntry
+from app.contracts import (
+    DocumentSpec,
+    GitHubCollectError,
+    JobError,
+    JobRequest,
+    NotionSnapshot,
+    ProfileFields,
+    TilEntry,
+)
 from app.main import create_app
 from tests.conftest import NOTION_TOKEN, PAT, FakeGitHub
 
@@ -305,3 +315,78 @@ async def test_portfolio_job_joins_til_when_notion_is_connected(
     assert "캐시 개선" in body
     assert "**성과**" in body and "**성장**" in body
     assert "publish_briefs" not in result.proposal.model_dump()
+
+
+async def test_collect_failure_is_logged_without_the_token(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    async def collect(*_args, **_kwargs):
+        raise GitHubCollectError(
+            JobError(code="mcp_unavailable", message="github mcp unavailable", retryable=True)
+        )
+
+    monkeypatch.setattr("app.api.jobs.collect_github", collect)
+    job = JobRequest(
+        job_id="log-1",
+        user_id="u1",
+        job_type="portfolio",
+        document=DocumentSpec(kind="portfolio"),
+    )
+    with caplog.at_level(logging.ERROR, logger="app.api.jobs"):
+        result = await handle_job(job, PAT)
+
+    assert result.error_code == "mcp_unavailable"
+    assert "job_id=log-1" in caplog.text
+    assert "error=mcp_unavailable" in caplog.text
+    assert PAT not in caplog.text
+
+
+async def test_unexpected_job_exception_is_logged_without_secrets(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    async def collect(*_args, **_kwargs):
+        raise RuntimeError(f"boom {PAT} {NOTION_TOKEN}")
+
+    monkeypatch.setattr("app.api.jobs.collect_github", collect)
+    job = JobRequest(
+        job_id="log-2",
+        user_id="u1",
+        job_type="portfolio",
+        document=DocumentSpec(kind="portfolio"),
+    )
+    with caplog.at_level(logging.ERROR, logger="app.api.jobs"):
+        result = await handle_job(job, PAT, NOTION_TOKEN)
+
+    assert result.error_code == "internal"
+    assert "job_id=log-2" in caplog.text
+    assert "exc_type=RuntimeError" in caplog.text
+    assert "«redacted»" in caplog.text
+    assert PAT not in caplog.text
+    assert NOTION_TOKEN not in caplog.text
+
+
+async def test_successful_job_log_has_no_token_or_title_text(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    fake = FakeGitHub()
+    real = __import__("app.collect.github", fromlist=["collect_github"]).collect_github
+
+    async def collect(req, github_pat, **_kwargs):
+        return await real(req, github_pat, call_tool=fake)
+
+    monkeypatch.setattr("app.api.jobs.collect_github", collect)
+    job = JobRequest(
+        job_id="log-ok",
+        user_id="u1",
+        job_type="resume",
+        repos=[{"owner": "acme", "name": "demo"}],
+        document=DocumentSpec(kind="resume", profile_fields=FIELDS),
+    )
+    with caplog.at_level(logging.INFO, logger="app.api.jobs"):
+        result = await handle_job(job, PAT)
+
+    assert result.ok is True
+    assert "job_id=log-ok" in caplog.text
+    assert "title_untitled=False" in caplog.text
+    assert PAT not in caplog.text
+    assert "홍길동" not in caplog.text

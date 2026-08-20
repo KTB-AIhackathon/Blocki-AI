@@ -5,10 +5,12 @@ from fastapi import FastAPI
 from app.api.executions import router as executions_router
 from app.api.jobs import router as jobs_router
 from app.api.notion import router as notion_router
+from app.log import configure as configure_logging
 from app.startup import is_production, verify_environment
 
 
 def create_app() -> FastAPI:
+    configure_logging()
     verify_environment()
     application = FastAPI(
         title="Blocki-AI",

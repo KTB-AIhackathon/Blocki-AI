@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import logging
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -73,18 +75,22 @@ def test_a_missing_token_is_reported_not_guessed(client: TestClient) -> None:
 
 
 def test_a_notion_outage_is_retryable_and_scrubbed(
-    client: TestClient, monkeypatch: pytest.MonkeyPatch
+    client: TestClient, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
     async def open_session(_token: str):
         raise RuntimeError(f"503 from notion for {NOTION_TOKEN}")
 
     monkeypatch.setattr("app.publish.notion.open_session", open_session)
-    response = client.post(PATH, json={"user_id": "u1"}, headers=HEADERS)
+    with caplog.at_level(logging.ERROR, logger="app.api.notion"):
+        response = client.post(PATH, json={"user_id": "u1"}, headers=HEADERS)
 
     body = response.json()
     assert body["ok"] is False
     assert body["error"]["retryable"] is True
     assert NOTION_TOKEN not in response.text
+    assert "notion dashboard error=internal" in caplog.text
+    assert "«redacted»" in caplog.text
+    assert NOTION_TOKEN not in caplog.text
 
 
 def test_the_endpoint_needs_the_internal_key(client: TestClient) -> None:

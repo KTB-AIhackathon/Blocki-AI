@@ -1,7 +1,11 @@
 from __future__ import annotations
 
+import logging
 from typing import Any
 
+import pytest
+
+from app.api.executions import post_execution
 from app.contracts import (
     ExecuteRequest,
     ReadmePrAction,
@@ -184,3 +188,24 @@ async def test_happy_path_created() -> None:
     assert opened["head"] == HEAD_BRANCH
     assert opened["base"] == "main"
     assert "secret-pat" not in str(github.calls)
+
+
+async def test_execution_exception_is_logged_without_the_token(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    token = "secret-pat"
+
+    async def boom(*_args, **_kwargs):
+        raise RuntimeError(f"failed with {token}")
+
+    monkeypatch.setattr("app.api.executions.execute_readme_pr", boom)
+    with caplog.at_level(logging.ERROR, logger="app.api.executions"):
+        result = await post_execution(_request(_action()), token, None)
+
+    assert result.status == "rejected"
+    assert result.error is not None
+    assert result.error.code == "internal"
+    assert EXECUTION_ID in caplog.text
+    assert "RuntimeError" in caplog.text
+    assert "«redacted»" in caplog.text
+    assert token not in caplog.text
