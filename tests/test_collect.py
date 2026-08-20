@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 
 import pytest
 
+from app.collect import github as github_collect
 from app.collect import parse
 from app.collect.github import collect_github
 from app.collect.mcp import mcp_url
@@ -30,6 +31,11 @@ def request_for(policy: CollectPolicy, **kwargs) -> CollectRequest:
 
 
 ACTIVITY = CollectPolicy(needs=["activity"])
+
+
+@pytest.fixture(autouse=True)
+def _fast_github_auth_retry(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(github_collect, "AUTH_RETRY_SECONDS", 0)
 DOCUMENT = CollectPolicy(
     needs=["activity", "profile_evidence"],
     use_cursor=False,
@@ -158,6 +164,21 @@ async def test_fatal_github_errors_are_mapped(message: str, code: str, retryable
     assert caught.value.error.code == code
     assert caught.value.error.retryable is retryable
     assert PAT not in str(caught.value)
+
+
+async def test_a_first_401_is_retried_once() -> None:
+    calls = {"n": 0}
+
+    def get_me(_args):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise RuntimeError("401 Unauthorized")
+        return {"login": "alice", "email": "alice@example.com"}
+
+    snap = await collect_github(request_for(ACTIVITY), PAT, call_tool=FakeGitHub(get_me=get_me))
+
+    assert calls["n"] == 2
+    assert snap.viewer_login == "alice"
 
 
 async def test_a_scope_error_names_the_scope_to_add() -> None:

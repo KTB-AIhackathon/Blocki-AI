@@ -28,7 +28,9 @@ from app.publish.notion_template import (
 
 __all__ = [
     "DashboardRef",
+    "DashboardRestricted",
     "OutsideDashboard",
+    "PAGE_ACCESS_HINT",
     "child_titles",
     "ensure_archive",
     "ensure_dashboard",
@@ -44,6 +46,13 @@ _VERSION = re.compile(r"^\s+v(\d+)\b")
 
 class OutsideDashboard(RuntimeError):
     """A write was aimed at something that is not the dashboard."""
+
+
+class DashboardRestricted(RuntimeError):
+    """The token cannot create the dashboard at the workspace root."""
+
+
+PAGE_ACCESS_HINT = "Notion에서 페이지 접근을 허용한 뒤 다시 연결해 주세요."
 
 
 @dataclass(frozen=True)
@@ -206,12 +215,7 @@ async def _find_at_private_root(session: NotionSession) -> DashboardRef | None:
 
 async def _build(session: NotionSession) -> DashboardRef:
     """Create the §3 tree at the private root, parent omitted to mean 'root'."""
-    page_id, page_url = await session.create_page(
-        title=DASHBOARD_TITLE,
-        markdown=render_dashboard_body(),
-        parent_id=None,
-        icon=DASHBOARD_ICON,
-    )
+    page_id, page_url = await _create_dashboard(session, parent_id=None)
     if not page_id:
         raise RuntimeError("notion create returned no id for the dashboard")
 
@@ -241,6 +245,44 @@ async def _ensure_children(session: NotionSession, parent_id: str) -> None:
                 parent_id=parent_id,
                 icon=child.icon,
             )
+
+
+async def _create_dashboard(
+    session: NotionSession, *, parent_id: str | None
+) -> tuple[str | None, str | None]:
+    try:
+        return await session.create_page(
+            title=DASHBOARD_TITLE,
+            markdown=render_dashboard_body(),
+            parent_id=parent_id,
+            icon=DASHBOARD_ICON,
+        )
+    except Exception as exc:
+        if parent_id is not None or not _is_restricted_root(exc):
+            raise
+        shared = await _first_shared_parent(session)
+        if shared is None:
+            raise DashboardRestricted(PAGE_ACCESS_HINT) from exc
+        return await session.create_page(
+            title=DASHBOARD_TITLE,
+            markdown=render_dashboard_body(),
+            parent_id=shared,
+            icon=DASHBOARD_ICON,
+        )
+
+
+async def _first_shared_parent(session: NotionSession) -> str | None:
+    """A page the token can already see. Lists the private root only — no search."""
+    try:
+        hits = await session.list_root_pages()
+    except Exception:
+        return None
+    return next((str(hit["id"]) for hit in hits if hit.get("id")), None)
+
+
+def _is_restricted_root(error: BaseException) -> bool:
+    text = str(error).lower()
+    return "403" in text or "restricted_resource" in text
 
 
 def _is_conflict(error: BaseException) -> bool:

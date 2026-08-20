@@ -113,6 +113,36 @@ async def test_a_deleted_template_child_is_recreated_from_markdown() -> None:
     assert DAILY_TEMPLATE_TITLE in workspace.titles_under(dashboard)
 
 
+class RestrictedRoot(NotionWorkspace):
+    async def create_page(
+        self, *, title: str, markdown: str, parent_id: str | None, icon: str | None = None
+    ) -> tuple[str | None, str | None]:
+        if parent_id is None:
+            raise RuntimeError("notion api 403 /pages: restricted_resource")
+        return await super().create_page(
+            title=title, markdown=markdown, parent_id=parent_id, icon=icon
+        )
+
+
+async def test_a_root_403_without_a_shared_page_names_the_fix() -> None:
+    workspace = RestrictedRoot()
+
+    with pytest.raises(dash.DashboardRestricted, match=dash.PAGE_ACCESS_HINT):
+        await dash.ensure_dashboard(workspace)
+
+
+async def test_a_root_403_creates_under_a_listed_private_page() -> None:
+    workspace = RestrictedRoot()
+    shared = workspace.seed("선택된 페이지")
+
+    ref = await dash.ensure_dashboard(workspace)
+
+    assert ref.created is True
+    dashboard = next(page for page in workspace.pages if page["title"] == DASHBOARD_TITLE)
+    assert dashboard["parent_id"] == shared
+    assert workspace.searches == []
+
+
 async def test_a_same_titled_page_nested_elsewhere_is_not_adopted() -> None:
     workspace = NotionWorkspace()
     other = workspace.seed("팀 위키")

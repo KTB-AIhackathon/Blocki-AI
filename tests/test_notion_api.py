@@ -8,6 +8,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.main import create_app
+from app.publish import notion_dashboard as dash
 from app.publish.notion_template import CHILD_PAGES, DASHBOARD_TITLE
 from tests.conftest import NOTION_TOKEN
 from tests.notion_double import NotionWorkspace, mcp_session
@@ -91,6 +92,25 @@ def test_a_notion_outage_is_retryable_and_scrubbed(
     assert "notion dashboard error=internal" in caplog.text
     assert "«redacted»" in caplog.text
     assert NOTION_TOKEN not in caplog.text
+
+
+def test_a_root_403_is_a_non_retryable_validation_error(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async def denied(**_kwargs):
+        raise dash.DashboardRestricted(dash.PAGE_ACCESS_HINT)
+
+    monkeypatch.setattr("app.api.notion.ensure_dashboard_page", denied)
+    response = client.post(PATH, json={"user_id": "u1"}, headers=HEADERS)
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["ok"] is False
+    assert body["error"] == {
+        "code": "validation",
+        "message": dash.PAGE_ACCESS_HINT,
+        "retryable": False,
+    }
 
 
 def test_the_endpoint_needs_the_internal_key(client: TestClient) -> None:

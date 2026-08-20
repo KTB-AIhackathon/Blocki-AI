@@ -241,6 +241,9 @@ def _viewer_of(raw: Any) -> ViewerIdentity:
     return ViewerIdentity(login=login, aliases=sorted(aliases))
 
 
+AUTH_RETRY_SECONDS = 2.0
+
+
 async def _call(call_tool: CallTool, name: str, args: dict[str, Any]) -> Any:
     for attempt in range(3):
         try:
@@ -251,7 +254,11 @@ async def _call(call_tool: CallTool, name: str, args: dict[str, Any]) -> Any:
         except GitHubCollectError:
             raise
         except BaseException as exc:
-            if parse.http_status(exc, str(exc)) == 429 and attempt < 2:
+            status = parse.http_status(exc, str(exc))
+            if status == 429 and attempt < 2:
+                continue
+            if status == 401 and attempt < 1:
+                await asyncio.sleep(AUTH_RETRY_SECONDS)
                 continue
             raise
     raise RuntimeError(f"collect exhausted retries: {name}")

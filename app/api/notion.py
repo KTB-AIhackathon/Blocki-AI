@@ -21,6 +21,7 @@ from app.api.deps import InternalKey, NotionToken
 from app.contracts import ErrorCode, JobError, NotionEnsureRequest, NotionEnsureResult
 from app.log import redact, redact_exc, short_id, utc_ts
 from app.publish import ensure_dashboard_page
+from app.publish.notion_dashboard import DashboardRestricted, PAGE_ACCESS_HINT
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -44,6 +45,14 @@ async def post_dashboard(
         )
     except asyncio.TimeoutError as exc:
         return _failed("internal", "notion ensure timed out", True, exc=exc, secret=token)
+    except DashboardRestricted as exc:
+        return _failed(
+            "validation",
+            str(exc).strip() or PAGE_ACCESS_HINT,
+            False,
+            exc=exc,
+            secret=token,
+        )
     except Exception as exc:
         return _failed(
             "internal",
