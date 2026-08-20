@@ -59,14 +59,14 @@ async def test_document_pipeline_renders_grounded_sections(job_type: str) -> Non
     proposal = await pipelines.run(document_job(job_type), snapshot)
 
     body = proposal.body_markdown
-    assert proposal.status == ("partial" if job_type == "resume" else "proposed")
+    assert proposal.status == "proposed"
     assert proposal.kind == job_type
     assert "홍길동" == proposal.owner_name
     assert "홍길동" not in body
     if job_type == "portfolio":
         assert "Python" in body and "FastAPI" in body
     else:
-        assert common.FILL_IN in body
+        assert "Python" in body
     # 커밋 제목은 문서에 싣지 않는다. 근거 참조로만 남는다.
     assert "결제 API 구현" not in body
     assert "demo" in body
@@ -101,10 +101,12 @@ async def test_resume_without_a_career_leaves_a_blank_to_fill_in() -> None:
 
     assert proposal.status == "partial"
     assert set(proposal.unresolved_fields) >= {"experience_md", "education_md"}
+    assert "skills_md" not in proposal.unresolved_fields
     assert proposal.error is None
     assert "## 경력" in proposal.body_markdown
     assert "## 학력" in proposal.body_markdown
-    assert proposal.body_markdown.count(common.FILL_IN) == 4
+    assert "Python" in proposal.body_markdown
+    assert proposal.body_markdown.count(common.FILL_IN) == 3
 
 
 async def test_a_supplied_career_replaces_the_blank() -> None:
@@ -117,9 +119,10 @@ async def test_a_supplied_career_replaces_the_blank() -> None:
     proposal = await pipelines.run(job, snapshot)
 
     assert "- 2025 ~ : 백엔드" in proposal.body_markdown
-    assert proposal.body_markdown.count(common.FILL_IN) == 3
+    assert proposal.body_markdown.count(common.FILL_IN) == 2
     assert "education_md" in proposal.unresolved_fields
     assert "experience_md" not in proposal.unresolved_fields
+    assert "skills_md" not in proposal.unresolved_fields
 
 
 async def test_a_document_without_a_name_is_still_blocked() -> None:

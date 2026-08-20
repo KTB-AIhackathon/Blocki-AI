@@ -25,9 +25,27 @@ def summary(evidence: Evidence, lines: list[str] | None = None) -> Section:
 
 
 def skills(evidence: Evidence, readme_skills: str) -> Section:
-    if not readme_skills.strip():
+    if readme_skills.strip():
+        return readme_skills.strip(), []
+    grouped = skill_analysis.group_by_category(evidence.skills)
+    if not grouped:
         return common.FILL_IN, []
-    return readme_skills.strip(), []
+    featured = [project.repo for project in evidence.projects]
+    blocks: list[str] = []
+    refs: list[EvidenceRef] = []
+    for label, members in grouped:
+        names = list(dict.fromkeys(skill.name for skill in members if _used_in(skill, featured)))
+        if not names:
+            continue
+        blocks.append(f"- **{label}**: {', '.join(names)}")
+        refs.extend(
+            common.skill_ref("skills_md", skill)
+            for skill in members
+            if skill.name in names
+        )
+    if not blocks:
+        return common.FILL_IN, []
+    return "\n".join(blocks), refs
 
 
 def projects(evidence: Evidence) -> Section:
@@ -131,6 +149,10 @@ def _capped(values) -> list[str]:
 
 def _fill_text() -> str:
     return common.FILL_IN.removeprefix("> ")
+
+
+def _used_in(skill: SkillFact, featured: list[str]) -> bool:
+    return any(repo in skill.repos for repo in featured)
 
 
 def _repo_label(repo: str, featured: list[str]) -> str:
