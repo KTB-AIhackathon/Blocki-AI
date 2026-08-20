@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 
-from app.analyze import analyze, projects, skills
+from app.analyze import analyze, projects, repos, skills
 from app.contracts import (
     CommitSummary,
     GitHubSnapshot,
@@ -215,6 +215,54 @@ def test_readme_and_document_commits_are_not_contribution_evidence() -> None:
     assert [h.subject for h in facts.highlights] == ["결제 API 구현"]
     # 개수는 사실이라 그대로 센다. 빼는 것은 내용뿐이다.
     assert facts.my_commits == 4
+
+
+def test_excluded_env_repos_never_enter_candidates(monkeypatch) -> None:
+    monkeypatch.setenv("BLOCKI_EXCLUDE_REPOS", "acme/secret")
+    evidence = analyze(snapshot(a_repo("secret"), a_repo("real")), now=NOW)
+
+    assert [p.repo for p in evidence.projects] == ["acme/real"]
+    assert "acme/secret" not in [p.repo for p in evidence.selection_candidates]
+
+
+def test_viewer_profile_readme_repo_is_not_a_project() -> None:
+    profile = a_repo(
+        "alice",
+        owner="alice",
+        commits=[a_commit(f"{i:012d}", f"feat: {i}", days=1) for i in range(20)],
+    )
+    evidence = analyze(snapshot(a_repo("real"), profile, viewer="alice"), now=NOW)
+
+    assert [p.repo for p in evidence.projects] == ["acme/real"]
+    assert "alice/alice" not in [p.repo for p in evidence.selection_candidates]
+
+
+def test_zero_own_commit_repos_drop_when_another_repo_has_mine() -> None:
+    mine = a_repo("mine")
+    other = a_repo("other", commits=[a_commit("b" * 12, "feat: 남의 작업", author="carol")])
+    evidence = analyze(snapshot(mine, other), now=NOW)
+
+    assert [p.repo for p in evidence.projects] == ["acme/mine"]
+    assert "acme/other" not in [p.repo for p in evidence.selection_candidates]
+    assert any("본인 커밋이 없어 제외" in warning for warning in evidence.warnings)
+
+
+def test_all_zero_own_commit_repos_stay_when_none_are_mine() -> None:
+    left = a_repo("left", commits=[a_commit("l" * 12, "feat: 팀 작업", author="carol")])
+    right = a_repo("right", commits=[a_commit("r" * 12, "feat: 다른 작업", author="dave")])
+    evidence = analyze(snapshot(left, right), now=NOW)
+
+    assert {p.repo for p in evidence.projects} == {"acme/left", "acme/right"}
+    assert not any("본인 커밋이 없어 제외" in warning for warning in evidence.warnings)
+
+
+def test_listed_eligible_matches_the_analyze_gate(monkeypatch) -> None:
+    monkeypatch.setenv("BLOCKI_EXCLUDE_REPOS", "acme/secret")
+    assert repos.listed_eligible({"full_name": "acme/acme"}) is False
+    assert repos.listed_eligible({"full_name": "acme/forked", "fork": True}) is False
+    assert repos.listed_eligible({"full_name": "acme/old", "archived": True}) is False
+    assert repos.listed_eligible({"full_name": "acme/secret"}) is False
+    assert repos.listed_eligible({"full_name": "acme/real"}) is True
 
 
 def test_forks_and_archived_repos_are_excluded() -> None:

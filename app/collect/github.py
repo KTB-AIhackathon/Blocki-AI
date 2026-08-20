@@ -8,6 +8,7 @@ from datetime import datetime
 from typing import Any
 
 from app.collect import parse
+from app.contracts.repo_filter import is_blocked_repo, listed_eligible
 from app.collect.mcp import CallTool, open_read_session
 from app.contracts import (
     CollectPolicy,
@@ -25,6 +26,10 @@ from app.contracts import (
     snapshot_digest_of,
     utcnow,
 )
+
+# list_repos is newest-first. Forks, archives, and the profile README often sit
+# in that window, so we scan past max_repos and keep only document candidates.
+LIST_SCAN = 40
 
 # Spring shows this to the user, so it names the fix rather than the symptom.
 SCOPE_HINT = (
@@ -52,14 +57,31 @@ async def collect_github(
     me = await _guarded(call_tool, "get_me", {}, github_pat)
     viewer = _viewer_of(me)
 
-    refs = list(req.repos)
-    if not refs:
-        listed = await _guarded(call_tool, "list_repos", {"limit": policy.max_repos}, github_pat)
-        refs = parse.repo_refs(listed)[: policy.max_repos]
+    requested = list(req.repos)
+    refs = [ref for ref in requested if _name_eligible(ref)][:LIST_SCAN]
+    if not requested:
+        listed = await _guarded(
+            call_tool,
+            "list_repos",
+            {"limit": max(policy.max_repos, LIST_SCAN)},
+            github_pat,
+        )
+        refs = []
+        for item in parse.as_list(listed):
+            if not listed_eligible(item):
+                continue
+            ref = parse.repo_ref(item)
+            if ref is None:
+                continue
+            refs.append(ref)
+            if len(refs) >= policy.max_repos:
+                break
 
     cursors = {(c.owner, c.name): c for c in (req.cursor or [])} if policy.use_cursor else {}
     since = None if policy.full_history else req.since
-    targets = refs[: policy.max_repos]
+    targets = refs if requested else refs[: policy.max_repos]
+    extras = _profile_extras(viewer.login, policy.needs)
+    extra_keys = {(ref.owner.casefold(), ref.name.casefold()) for ref in extras}
 
     # Repositories do not depend on each other, and each one is six sequential round trips to
     # a remote server. Gathered results are still read back in `targets` order, because the
@@ -80,15 +102,19 @@ async def collect_github(
             )
 
     outcomes = await asyncio.gather(
-        *(collect_one(ref) for ref in targets), return_exceptions=True
+        *(collect_one(ref) for ref in [*targets, *extras]), return_exceptions=True
     )
 
-    repos: list[RepoActivity] = []
-    next_cursor: list[RepoCursor] = []
-    for ref, outcome in zip(targets, outcomes, strict=True):
+    collected: list[RepoActivity] = []
+    cursors_by_repo: dict[tuple[str, str], RepoCursor] = {}
+    for ref, outcome in zip([*targets, *extras], outcomes, strict=True):
         if isinstance(outcome, BaseException):
             if isinstance(outcome, GitHubCollectError):
                 raise outcome
+            if (ref.owner.casefold(), ref.name.casefold()) in extra_keys and parse.http_status(
+                outcome, str(outcome)
+            ) == 404:
+                continue
             error = _fatal(outcome, github_pat)
             if error.error.code in ("github_auth", "github_rate_limit"):
                 raise error from None
@@ -99,9 +125,26 @@ async def collect_github(
             complete = False
             continue
         activity, cursor = outcome
-        repos.append(activity)
+        collected.append(activity)
         if cursor is not None:
-            next_cursor.append(cursor)
+            cursors_by_repo[(activity.owner, activity.name)] = cursor
+
+    projects: list[RepoActivity] = []
+    profile_repos: list[RepoActivity] = []
+    for activity in collected:
+        key = (activity.owner.casefold(), activity.name.casefold())
+        if key in extra_keys:
+            profile_repos.append(activity)
+            continue
+        if is_blocked_repo(activity.owner, activity.name, fork=activity.fork, archived=activity.archived):
+            continue
+        projects.append(activity)
+    repos = projects[: policy.max_repos] + profile_repos
+    next_cursor = [
+        cursors_by_repo[(repo.owner, repo.name)]
+        for repo in repos
+        if (repo.owner, repo.name) in cursors_by_repo
+    ]
 
     return GitHubSnapshot(
         collected_at=collected_at,
@@ -144,7 +187,14 @@ async def _collect_repo(
         )
 
     readme = None
-    if "readme" in policy.needs:
+    login = (viewer.login or "").strip()
+    profile_readme = (
+        "profile_evidence" in policy.needs
+        and bool(login)
+        and ref.owner.casefold() == login.casefold()
+        and ref.name.casefold() == login.casefold()
+    )
+    if "readme" in policy.needs or profile_readme:
         readme = await _collect_readme(call_tool, ref, readme_path)
 
     activity = RepoActivity(
@@ -232,6 +282,17 @@ async def _collect_readme(call_tool: CallTool, ref: RepoRef, path: str):
             return None
         raise
     return parse.readme_blob(blob)
+
+
+def _name_eligible(ref: RepoRef) -> bool:
+    return not is_blocked_repo(ref.owner, ref.name, fork=False, archived=False)
+
+
+def _profile_extras(login: str | None, needs: list[str]) -> list[RepoRef]:
+    name = (login or "").strip()
+    if "profile_evidence" not in needs or not name:
+        return []
+    return [RepoRef(owner=name, name=name)]
 
 
 def _viewer_of(raw: Any) -> ViewerIdentity:

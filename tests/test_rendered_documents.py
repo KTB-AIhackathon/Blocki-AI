@@ -157,10 +157,19 @@ async def test_resume_uses_profile_readme_sections_as_confirmable_drafts() -> No
                 name="alice",
                 readme=ReadmeBlob(
                     path="README.md",
+                    blob_sha="wrong",
+                    content="## 경력\n\n- 프로젝트 README를 초안으로 쓰면 안 됨",
+                ),
+            ),
+            RepoActivity(
+                owner="alice",
+                name="alice",
+                readme=ReadmeBlob(
+                    path="README.md",
                     blob_sha="r",
                     content="## 경력\n\n- 백엔드 개발\n\n## 학력\n\n- 컴퓨터공학\n\n## 기술\n\n- Python",
                 ),
-            )
+            ),
         ],
     )
     proposal = await build_resume(_job("resume"), snapshot, _evidence([project]))
@@ -169,6 +178,7 @@ async def test_resume_uses_profile_readme_sections_as_confirmable_drafts() -> No
     assert "- 백엔드 개발" in proposal.body_markdown
     assert "- 컴퓨터공학" in proposal.body_markdown
     assert "- Python" in proposal.body_markdown
+    assert "프로젝트 README를 초안으로 쓰면 안 됨" not in proposal.body_markdown
 
 
 @pytest.mark.asyncio
