@@ -575,12 +575,16 @@ def test_brief_includes_readme_lead_and_layout_not_just_commits() -> None:
     project = four_projects()[0].model_copy(
         update={
             "readme_lead": "패키지를 설치하고 바로 쓸 수 있게 정리한 배포본이다.",
+            "readme_sections": ["설치", "구성"],
+            "readme_dirs": ["common", "install.sh"],
             "layout": ["pyproject.toml", "Dockerfile"],
         }
     )
     sheet = briefs.brief_of(project, evidence_of([project]))
     assert "## 개요" in sheet
     assert "패키지를 설치하고 바로 쓸 수 있게 정리한 배포본이다." in sheet
+    assert "## 구성\n\n- common\n- install.sh" in sheet
+    assert "## 섹션\n\n- 설치\n- 구성" in sheet
     assert "## 구성 파일" in sheet
     assert "- pyproject.toml" in sheet
     assert "- Dockerfile" in sheet

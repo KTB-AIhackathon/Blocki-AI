@@ -125,6 +125,8 @@ class ProjectFacts(BaseModel):
     issues: list[WorkItem] = Field(default_factory=list)
     til: list[TilFact] = Field(default_factory=list)
     readme_lead: str | None = None
+    readme_sections: list[str] = Field(default_factory=list)
+    readme_dirs: list[str] = Field(default_factory=list)
     layout: list[str] = Field(default_factory=list)
     score: float = 0.0
     score_breakdown: dict[str, float] = Field(default_factory=dict)

@@ -357,3 +357,31 @@ def test_facts_copy_readme_lead_and_layout_without_rewriting() -> None:
     assert facts.readme_lead == "Clean shareable harness. Second line stays in the same paragraph."
     assert facts.layout == ["pyproject.toml", "Dockerfile"]
     assert projects.readme_lead("# Only heading\n\n") is None
+
+
+def test_readme_lead_prefers_body_over_link_blockquote() -> None:
+    content = (
+        "# clx-harness-full-package\n\n"
+        "> **구조 시각화 사이트**: <https://example.com/pages/> — 레포 구성\n\n"
+        '**한 줄 요약: Claude Code + Codex 에이전트 하네스의 "클린 배포판"입니다.** '
+        "개인정보는 없습니다.\n\n"
+        "## OS별 활성화\n\n본문\n\n## 구성\n\n"
+        "```\n"
+        "common/            공통\n"
+        "macos-harness/     macOS\n"
+        "install.sh         설치기\n"
+        "```\n"
+    )
+    repo = a_repo(readme=ReadmeBlob(path="README.md", blob_sha="r" * 40, content=content))
+    facts = projects.facts_of(repo, ALICE, now=NOW)
+    assert facts.readme_lead is not None
+    assert "클린 배포판" in facts.readme_lead
+    assert "example.com" not in facts.readme_lead
+    assert facts.readme_sections == ["OS별 활성화", "구성"]
+    assert facts.readme_dirs == ["common", "macos-harness", "install.sh"]
+
+
+def test_init_commit_is_not_a_highlight() -> None:
+    repo = a_repo(commits=[a_commit("a" * 12, "init"), a_commit("b" * 12, "feat: 결제 API 구현")])
+    facts = projects.facts_of(repo, ALICE, now=NOW)
+    assert [item.subject for item in facts.highlights] == ["결제 API 구현"]

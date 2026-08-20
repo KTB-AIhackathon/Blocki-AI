@@ -55,6 +55,15 @@ _HIGHLIGHT_ORDER: tuple[ChangeType, ...] = ("feat", "perf", "fix", "refactor", "
 _RECENT_DAYS = 90
 _YEAR_DAYS = 365
 _MAX_WORK_ITEMS = 3
+_BOOTSTRAP = re.compile(
+    r"^(init|initial commit|first commit|initial|초기\s*커밋|프로젝트\s*생성)\.?$",
+    re.IGNORECASE,
+)
+_URLISH = re.compile(r"https?://\S+|www\.\S+", re.IGNORECASE)
+_MD_LINK = re.compile(r"\[([^\]]*)\]\([^)]+\)")
+_MARKUP = re.compile(r"[*_`<>#\[\]()]+")
+_CODE_FENCE = {"bash", "sh", "zsh", "shell", "powershell", "ps1", "python", "py", "js", "ts", "json", "yaml", "yml"}
+_DIR_NAME = re.compile(r"^[\w.\-]+$")
 
 
 def facts_of(
@@ -85,6 +94,8 @@ def facts_of(
         )),
         highlights=_highlights(repo.full_name, mine, max_highlights),
         readme_lead=readme_lead(repo.readme.content if repo.readme else None),
+        readme_sections=readme_sections(repo.readme.content if repo.readme else None),
+        readme_dirs=readme_dirs(repo.readme.content if repo.readme else None),
         layout=_layout(repo.manifest_files),
         pull_requests=_owned_work(
             [pr for pr in repo.pull_requests if pr.merged],
@@ -105,12 +116,31 @@ def facts_of(
     return facts
 
 
-def readme_lead(content: str | None, *, max_chars: int = 200) -> str | None:
-    """First readable README paragraph. No rewriting."""
+def readme_lead(content: str | None, *, max_chars: int = 280) -> str | None:
+    """First real README paragraph. Quotes and link-only lines lose to body text."""
     if not content:
         return None
+    bodies: list[str] = []
+    quotes: list[str] = []
     chunks: list[str] = []
+    in_quote = False
+    in_fence = False
+
+    def flush() -> None:
+        nonlocal chunks
+        text = " ".join(chunks).strip()
+        chunks = []
+        if text:
+            (quotes if in_quote else bodies).append(text)
+
     for raw in content.splitlines():
+        if raw.startswith("```"):
+            if chunks:
+                flush()
+            in_fence = not in_fence
+            continue
+        if in_fence:
+            continue
         line = raw.strip()
         if (
             not line
@@ -120,20 +150,97 @@ def readme_lead(content: str | None, *, max_chars: int = 200) -> str | None:
             or line.startswith("![")
         ):
             if chunks:
-                break
+                flush()
             continue
-        if line.startswith(">"):
+        quoted = line.startswith(">")
+        if quoted:
             line = line[1:].strip()
-        if not line:
+            if not line:
+                if chunks:
+                    flush()
+                continue
+        if _pointer(line):
             if chunks:
-                break
+                flush()
             continue
+        if chunks and quoted != in_quote:
+            flush()
+        if not chunks:
+            in_quote = quoted
         chunks.append(line)
-        text = " ".join(chunks)
-        if len(text) >= max_chars:
-            return text[:max_chars].rstrip()
-    text = " ".join(chunks).strip()
-    return text[:max_chars] if text else None
+        joined = " ".join(chunks)
+        if len(joined) >= max_chars:
+            chunks = [joined[:max_chars].rstrip()]
+            flush()
+            break
+    else:
+        flush()
+
+    for text in (*bodies, *quotes):
+        if text:
+            return text[:max_chars]
+    return None
+
+
+def readme_sections(content: str | None, *, limit: int = 8) -> list[str]:
+    if not content:
+        return []
+    titles: list[str] = []
+    for raw in content.splitlines():
+        line = raw.strip()
+        if not line.startswith("## ") or line.startswith("###"):
+            continue
+        title = line[3:].strip().lstrip("#").strip()
+        if not title or title in titles:
+            continue
+        titles.append(title)
+        if len(titles) >= limit:
+            break
+    return titles
+
+
+def readme_dirs(content: str | None, *, limit: int = 8) -> list[str]:
+    """Top-level names from the first directory-looking fence. No rewriting."""
+    if not content:
+        return []
+    in_fence = False
+    skip_lang = False
+    names: list[str] = []
+    for raw in content.splitlines():
+        if raw.startswith("```"):
+            if in_fence:
+                if len(names) >= 2:
+                    return names[:limit]
+                names = []
+                in_fence = False
+                continue
+            in_fence = True
+            lang = raw[3:].strip().split()[0].lower() if raw[3:].strip() else ""
+            skip_lang = lang in _CODE_FENCE
+            names = []
+            continue
+        if not in_fence or skip_lang:
+            continue
+        if raw.startswith((" ", "\t")):
+            continue
+        token = raw.strip().split()[0].rstrip("/") if raw.strip() else ""
+        if not token or not _DIR_NAME.match(token) or token in names:
+            continue
+        names.append(token)
+    if len(names) >= 2:
+        return names[:limit]
+    return []
+
+
+def _pointer(line: str) -> bool:
+    has_url = bool(_URLISH.search(line) or _MD_LINK.search(line) or "<http" in line)
+    leftover = _MD_LINK.sub(r"\1", line)
+    leftover = _URLISH.sub("", leftover)
+    leftover = _MARKUP.sub(" ", leftover)
+    leftover = re.sub(r"\s+", " ", leftover).strip(" :-—·|")
+    if not leftover:
+        return True
+    return has_url and len(leftover) < 40
 
 
 def _layout(paths: list[str], *, limit: int = 8) -> list[str]:
@@ -230,7 +337,7 @@ def _highlights(repo: str, commits: list[CommitSummary], limit: int) -> list[Com
         subject, change_type = classify(commit.message)
         # README 와 문서 커밋은 근거로 쓰지 않는다. 어느 문서에도, LLM 프롬프트에도
         # 들어가면 안 되므로 여기서 한 번만 걸러 낸다.
-        if not subject or change_type == "docs":
+        if not subject or change_type == "docs" or _BOOTSTRAP.match(subject):
             continue
         key = subject.casefold()
         if key in seen:

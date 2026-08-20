@@ -43,6 +43,12 @@ def brief_of(project: ProjectFacts, evidence: Evidence) -> str:
     description = (project.description or "").strip()
     if lead and lead != description:
         parts.extend(["", "## 개요", "", lead])
+    if project.readme_dirs:
+        parts.extend(["", "## 구성", ""])
+        parts.extend(f"- {name}" for name in project.readme_dirs)
+    if project.readme_sections:
+        parts.extend(["", "## 섹션", ""])
+        parts.extend(f"- {title}" for title in project.readme_sections)
     if project.layout:
         parts.extend(["", "## 구성 파일", ""])
         parts.extend(f"- {name}" for name in project.layout)
