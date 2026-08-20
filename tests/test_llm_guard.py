@@ -74,6 +74,9 @@ async def test_grounded_sentences_reach_the_document() -> None:
     assert "결제 도메인 백엔드를 맡았습니다." in proposal.body_markdown
     assert "EVIDENCE" in llm.prompts[0]
     assert PAT not in llm.prompts[0]
+    assert '"my_commits"' not in llm.prompts[0]
+    assert '"topics"' not in llm.prompts[0]
+    assert '"weight"' not in llm.prompts[0]
 
 
 async def test_sentences_without_real_evidence_are_dropped() -> None:
@@ -89,21 +92,24 @@ async def test_sentences_without_real_evidence_are_dropped() -> None:
 
     assert "쿠버네티스" not in proposal.body_markdown
     assert "근거 없는 문장" not in proposal.body_markdown
-    # Falls back to the deterministic summary rather than leaving a hole.
-    assert "주로 사용하는 기술은" in proposal.body_markdown
+    assert "주로 사용하는 기술은" not in proposal.body_markdown
+    assert "## 소개" not in proposal.body_markdown
+    assert proposal.status == "proposed"
 
 
 async def test_a_failing_provider_does_not_fail_the_job() -> None:
     proposal = await portfolio_with(FakeLLM(RuntimeError("provider exploded")))
 
     assert proposal.status == "proposed"
-    assert "주로 사용하는 기술은" in proposal.body_markdown
+    assert "주로 사용하는 기술은" not in proposal.body_markdown
+    assert "## 프로젝트" in proposal.body_markdown
 
 
 async def test_document_is_identical_with_no_provider_configured() -> None:
     with_none = await portfolio_with(None)
     assert with_none.status == "proposed"
-    assert "주로 사용하는 기술은" in with_none.body_markdown
+    assert "주로 사용하는 기술은" not in with_none.body_markdown
+    assert "## 프로젝트" in with_none.body_markdown
 
 
 def test_provider_selection_is_config_driven(monkeypatch: pytest.MonkeyPatch) -> None:

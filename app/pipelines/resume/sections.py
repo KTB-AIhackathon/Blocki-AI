@@ -3,38 +3,20 @@
 from __future__ import annotations
 
 from app.analyze import skills as skill_analysis
-from app.contracts import Evidence, EvidenceRef, ProjectFacts
+from app.contracts import Evidence, EvidenceRef, ProjectFacts, SkillFact
 from app.pipelines import common
 
 Section = tuple[str, list[EvidenceRef]]
 
-MAX_HIGHLIGHTS = 3
+MAX_HIGHLIGHTS = 2
 
 
 def summary(evidence: Evidence, extra_lines: list[str] | None = None) -> Section:
-    if evidence.is_empty():
+    lines = [line.strip() for line in (extra_lines or []) if line.strip()]
+    if not lines:
         return "", []
-    refs: list[EvidenceRef] = [
-        common.project_ref("summary_md", p) for p in evidence.projects
-    ]
-    if extra_lines:
-        return "\n\n".join(extra_lines), refs
-
-    span = common.period(evidence.period_start, evidence.period_end)
-    top = [s.name for s in evidence.skills if s.category in ("language", "framework")][:4]
-    clauses: list[str] = []
-    if span:
-        clauses.append(f"{span} 동안 프로젝트 {len(evidence.projects)}개를 진행했습니다")
-    if top:
-        clauses.append(f"주요 기술은 {', '.join(top)} 입니다")
-        refs.extend(
-            common.skill_ref("summary_md", s)
-            for s in evidence.skills
-            if s.name in top
-        )
-    if not clauses:
-        return "", []
-    return ". ".join(clauses) + ".", refs
+    refs = [common.project_ref("summary_md", p) for p in evidence.projects]
+    return "\n\n".join(lines), refs
 
 
 def skills(evidence: Evidence) -> Section:
@@ -52,36 +34,38 @@ def skills(evidence: Evidence) -> Section:
 def projects(evidence: Evidence) -> Section:
     if not evidence.projects:
         return "", []
-    blocks: list[str] = []
+    lines: list[str] = []
     refs: list[EvidenceRef] = []
     for facts in evidence.projects:
-        block, block_refs = _project_block(facts)
-        blocks.append(block)
-        refs.extend(block_refs)
-    return "\n\n".join(blocks), refs
+        line, line_refs = _project_line(facts, evidence.skills)
+        lines.append(line)
+        refs.extend(line_refs)
+    return "\n".join(lines), refs
 
 
-def _project_block(facts: ProjectFacts) -> Section:
+def _project_line(facts: ProjectFacts, catalogue: list[SkillFact]) -> Section:
     refs = [common.project_ref("projects_md", facts)]
-    span = common.period(facts.started_at, facts.ended_at)
-    heading = f"### {facts.repo}"
-    if span:
-        heading += f" ({span})"
-    parts = [heading, ""]
-
-    meta = [common.team_label(facts)]
-    stack = ", ".join(s.name for s in facts.languages)
+    title = (facts.description or "").strip() or facts.repo.rsplit("/", 1)[-1]
+    shown = [item for item in facts.highlights if (item.subject or "").strip()][
+        :MAX_HIGHLIGHTS
+    ]
+    work = ", ".join(item.subject.strip() for item in shown)
+    stack = [skill for skill in catalogue if facts.repo in skill.repos]
     if stack:
-        meta.append(stack)
-        refs.extend(common.skill_ref("projects_md", s) for s in facts.languages)
-    scale = common.scale(facts)
-    if scale:
-        meta.append(scale)
-    parts.append(f"- {' · '.join(meta)}")
-
-    if facts.description:
-        parts.append(f"- {facts.description}")
-    for highlight in facts.highlights[:MAX_HIGHLIGHTS]:
-        parts.append(f"- {highlight.subject}")
+        refs.extend(
+            common.skill_ref(
+                "projects_md", skill.model_copy(update={"repos": [facts.repo]})
+            )
+            for skill in stack
+        )
+    for highlight in shown:
         refs.append(common.commit_ref("projects_md", highlight))
-    return "\n".join(parts).rstrip(), refs
+
+    names = ", ".join(skill.name for skill in stack)
+    if work and names:
+        return f"- {title} — {work} `{names}`", refs
+    if work:
+        return f"- {title} — {work}", refs
+    if names:
+        return f"- {title} `{names}`", refs
+    return f"- {title}", refs

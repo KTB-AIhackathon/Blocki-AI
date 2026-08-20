@@ -76,12 +76,26 @@ def evidence_of(
     return Evidence(
         viewer=ViewerIdentity(login="alice", aliases=["alice"]),
         projects=projects,
-        skills=skills if skills is not None else projects[0].languages,
+        skills=skills if skills is not None else _skills_from(projects),
         period_start=NOW if period else None,
         period_end=NOW if period else None,
         my_commits=sum(p.my_commits for p in projects),
         complete=True,
     )
+
+
+def _skills_from(projects: list[ProjectFacts]) -> list[SkillFact]:
+    merged: dict[str, SkillFact] = {}
+    for project in projects:
+        for skill in project.languages:
+            current = merged.get(skill.name)
+            if current is None:
+                merged[skill.name] = skill.model_copy(update={"repos": list(skill.repos)})
+                continue
+            repos = list(current.repos)
+            repos.extend(repo for repo in skill.repos if repo not in repos)
+            merged[skill.name] = current.model_copy(update={"repos": repos})
+    return list(merged.values())
 
 
 def snapshot() -> GitHubSnapshot:
@@ -114,7 +128,7 @@ async def build_portfolio(
 
 
 def project_headings(body: str) -> list[str]:
-    start = body.find("## 🚀 Projects")
+    start = body.find("## 프로젝트")
     section = body[start:] if start >= 0 else ""
     return [line for line in section.splitlines() if line.startswith("### ")]
 
@@ -127,21 +141,7 @@ def grounded_llm() -> FakeLLM:
                     "text": "결제와 알림을 다루는 백엔드를 만들었습니다.",
                     "evidence_ids": ["repo:acme/alpha"],
                 }
-            ],
-            "projects": [
-                {
-                    "text": "결제 API를 구현했습니다.",
-                    "evidence_ids": ["repo:acme/alpha"],
-                },
-                {
-                    "text": "알림 발송을 추가했습니다.",
-                    "evidence_ids": ["repo:acme/beta"],
-                },
-                {
-                    "text": "타임아웃을 수정했습니다.",
-                    "evidence_ids": ["repo:acme/gamma"],
-                },
-            ],
+            ]
         }
     )
 
@@ -156,7 +156,8 @@ async def test_portfolio_keeps_only_the_top_three_projects() -> None:
     ]
     assert "### delta" not in proposal.body_markdown
     assert "### Contact" not in project_headings(proposal.body_markdown)
-    assert "| 프로젝트 | 3개 |" in proposal.body_markdown
+    assert "Activity" not in proposal.body_markdown
+    assert "규모:" not in proposal.body_markdown
 
 
 async def test_colliding_repo_names_use_full_path() -> None:
@@ -200,7 +201,7 @@ async def test_grounded_project_lines_keep_description_and_highlights() -> None:
 
     body = proposal.body_markdown
     assert "결제와 알림을 다루는 백엔드를 만들었습니다." in body
-    assert "결제 API를 구현했습니다." in body
+    assert "결제 API를 구현했습니다." not in body
     assert "> alpha 서비스" in body
     assert "- one" in body and "- two" in body and "- three" in body
     assert "- four" not in body
@@ -235,7 +236,7 @@ async def test_hallucinated_project_ids_fall_back_to_facts() -> None:
     proposal = await build_portfolio(llm)
 
     assert "쿠버네티스" not in proposal.body_markdown
-    assert "결제 API 기여를 했습니다." in proposal.body_markdown
+    assert "결제 API 기여를 했습니다." not in proposal.body_markdown
     assert "aaaaaaa" not in proposal.body_markdown
     assert "feat: 알림 발송" in proposal.body_markdown
     assert "bbbbbbb" not in proposal.body_markdown
@@ -273,30 +274,38 @@ async def test_skills_list_featured_repos_not_percents() -> None:
     body = proposal.body_markdown
 
     assert "100%" not in body
-    assert "- Python — alpha, beta, gamma" in body
-    assert "- FastAPI — alpha" in body
+    assert "- **Languages**: Python" in body
+    assert "- **Frameworks**: FastAPI" in body
     assert "Redis" not in body
     assert "**Database**" not in body
+    assert "— alpha" not in body
+    assert "hackathon" not in body
+    cards = body[body.find("## 프로젝트") :]
+    alpha = cards.split("### ")[1]
+    assert "기술: Python, FastAPI" in alpha
+    assert "기술: Python, FastAPI" not in cards.split("### beta", 1)[-1]
     skill_repos = {
         ref.repo
         for ref in proposal.evidence_refs
-        if ref.field == "skills_md" and ref.source_id == "skill:python"
+        if ref.field == "projects_md" and ref.source_id == "skill:fastapi"
     }
-    assert skill_repos == {"acme/alpha", "acme/beta", "acme/gamma"}
+    assert skill_repos == {"acme/alpha"}
 
 
-async def test_fallback_about_does_not_repeat_activity_counts() -> None:
+async def test_fallback_about_does_not_invent_a_sentence() -> None:
     proposal = await build_portfolio(llm=None)
-    assert "주로 사용하는 기술은" in proposal.body_markdown
+    assert "주로 사용하는 기술은" not in proposal.body_markdown
     assert "동안 프로젝트" not in proposal.body_markdown
+    assert "## 소개" not in proposal.body_markdown
 
 
-async def test_about_keeps_counts_when_there_are_no_skills() -> None:
+async def test_about_stays_empty_when_there_are_no_skills() -> None:
     projects = four_projects()
     proposal = await build_portfolio(
         llm=None, projects=projects, evidence=evidence_of(projects, skills=[])
     )
-    assert "동안 프로젝트" in proposal.body_markdown
+    assert "동안 프로젝트" not in proposal.body_markdown
+    assert "## 소개" not in proposal.body_markdown
 
 
 async def test_intro_refs_cite_only_used_evidence() -> None:

@@ -145,7 +145,9 @@ async def test_portfolio_and_resume_differ_in_shape() -> None:
     )
     resume = await pipelines.run(document_job("resume"), await snapshot_for("resume", FakeGitHub()))
 
-    assert "## 📊 Activity" in portfolio.body_markdown
+    assert "## 프로젝트" in portfolio.body_markdown
+    assert "## 주요 작업" in resume.body_markdown
+    assert "Activity" not in portfolio.body_markdown
     assert "Activity" not in resume.body_markdown
     assert "## 경력" in resume.body_markdown
     assert len(portfolio.body_markdown) > len(resume.body_markdown)
@@ -213,9 +215,9 @@ def test_render_drops_sections_with_no_content() -> None:
         "v1",
         {"name": "홍길동", "summary_md": "한 줄 소개", "skills_md": "- Python"},
     )
-    assert "## 👋 About Me" in body
-    assert "## 🛠 Tech Stack" in body
-    assert "## 🚀 Projects" not in body
+    assert "## 소개" in body
+    assert "## 기술" in body
+    assert "## 프로젝트" not in body
     assert "### Contact" not in body
     assert "\n\n\n" not in body
 

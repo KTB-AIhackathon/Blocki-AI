@@ -20,17 +20,15 @@ from app.pipelines.portfolio import sections
 KIND = "portfolio"
 MAX_FEATURED = 3
 INSTRUCTION = (
-    "아래 개발자의 GitHub 활동 근거만 보고 "
-    "소개 2~3문장과 선정된 프로젝트별 기여 요약 1문장을 써라. "
-    "소개는 intro, 프로젝트 요약은 projects 에 넣는다. "
-    "프로젝트 문장은 해당 repo:{owner/name} id를 evidence_ids에 포함한다. "
-    "근거가 부족하면 문장 수를 줄인다. 없는 사실을 만들지 않는다."
+    "EVIDENCE만 보고 소개를 intro에 한국어로 쓴다. "
+    "만든 사실만 쓴다. 성격이나 미션 문장은 쓰지 않는다. "
+    "분량은 근거가 닿는 만큼만 쓴다. 얇으면 줄이거나 생략한다. "
+    "각 문장에 evidence_ids를 넣는다."
 )
 
 
 class _Draft(BaseModel):
     intro: list[guard.GroundedText] = Field(default_factory=list)
-    projects: list[guard.GroundedText] = Field(default_factory=list)
 
 
 async def build(
@@ -52,11 +50,10 @@ async def build(
         return common.blocked(job, KIND, missing, template_ref)
 
     view = _featured(evidence)
-    intro, summaries = await _draft(view, llm)
+    intro = await _draft(view, llm)
     summary_md, summary_refs = sections.summary(view, intro)
-    stats_md, stats_refs = sections.stats(view)
     skills_md, skills_refs = sections.skills(view)
-    projects_md, projects_refs = sections.projects(view, summaries)
+    projects_md, projects_refs = sections.projects(view)
 
     body = render.render(
         KIND,
@@ -65,7 +62,6 @@ async def build(
             "name": fields.name,
             "contact_md": fields.contact_md,
             "summary_md": summary_md,
-            "stats_md": stats_md,
             "skills_md": skills_md,
             "projects_md": projects_md,
             "experience_md": fields.experience_md,
@@ -73,8 +69,8 @@ async def build(
         },
     )
 
-    unresolved = _unresolved(fields, summary_md, skills_md, projects_md)
-    refs: list[EvidenceRef] = [*summary_refs, *stats_refs, *skills_refs, *projects_refs]
+    unresolved = _unresolved(fields, skills_md, projects_md)
+    refs: list[EvidenceRef] = [*summary_refs, *skills_refs, *projects_refs]
     complete = snapshot.complete and evidence.complete and not unresolved
     return ArtifactProposal(
         proposal_id="",
@@ -105,32 +101,52 @@ def _featured(evidence: Evidence) -> Evidence:
     )
 
 
-async def _draft(
-    evidence: Evidence, llm: Any | None
-) -> tuple[list[guard.GroundedText], dict[str, guard.GroundedText]]:
+async def _draft(evidence: Evidence, llm: Any | None) -> list[guard.GroundedText]:
     if evidence.is_empty():
-        return [], {}
-    result = await guard.complete(_Draft, instruction=INSTRUCTION, evidence=evidence, llm=llm)
+        return []
+    result = await guard.complete(
+        _Draft,
+        instruction=INSTRUCTION,
+        evidence=evidence,
+        extra={"evidence": _digest(evidence)},
+        llm=llm,
+    )
     if result is None:
-        return [], {}
-    allowed = evidence.ids()
-    intro = guard.keep_grounded(result.intro, allowed)
-    project_ids = {p.id for p in evidence.projects}
-    summaries: dict[str, guard.GroundedText] = {}
-    for item in guard.keep_grounded(result.projects, allowed):
-        repo_ids = [sid for sid in item.evidence_ids if sid in project_ids]
-        if len(repo_ids) != 1:
-            continue
-        summaries[repo_ids[0]] = item
-    return intro, summaries
+        return []
+    return guard.keep_grounded(result.intro, evidence.ids())
 
 
-def _unresolved(
-    fields: ProfileFields, summary_md: str, skills_md: str, projects_md: str
-) -> list[str]:
+def _digest(evidence: Evidence) -> dict[str, Any]:
+    featured = {project.repo for project in evidence.projects}
+    return {
+        "viewer": evidence.viewer.login,
+        "skills": [
+            {"id": skill.id, "name": skill.name, "category": skill.category}
+            for skill in evidence.skills
+            if any(repo in featured for repo in skill.repos)
+        ],
+        "projects": [
+            {
+                "id": project.id,
+                "repo": project.repo,
+                "description": project.description,
+                "languages": [skill.name for skill in project.languages],
+                "highlights": [
+                    {
+                        "id": item.id,
+                        "subject": item.subject,
+                        "change_type": item.change_type,
+                    }
+                    for item in project.highlights
+                ],
+            }
+            for project in evidence.projects
+        ],
+    }
+
+
+def _unresolved(fields: ProfileFields, skills_md: str, projects_md: str) -> list[str]:
     unresolved: list[str] = []
-    if not summary_md:
-        unresolved.append("summary_md")
     if not skills_md:
         unresolved.append("skills_md")
     if not projects_md:

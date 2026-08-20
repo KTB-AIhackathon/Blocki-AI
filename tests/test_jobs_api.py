@@ -223,4 +223,4 @@ async def test_document_job_ignores_a_stale_cursor(monkeypatch: pytest.MonkeyPat
     result = await handle_job(job, PAT)
 
     assert result.ok is True
-    assert "Projects" in (result.artifact.body_markdown if result.artifact else "")
+    assert "## 프로젝트" in (result.artifact.body_markdown if result.artifact else "")

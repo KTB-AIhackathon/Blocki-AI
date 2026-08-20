@@ -119,7 +119,7 @@ def test_portfolio_flows_from_github_to_spring_and_notion(
     markdown = body["artifact"]["body_markdown"]
     assert body["artifact"]["kind"] == "portfolio"
     assert "홍길동" in markdown
-    assert "Projects" in markdown
+    assert "## 프로젝트" in markdown
     assert "https://github.com/acme/demo" in markdown
 
     assert body["notion"] == {
@@ -152,7 +152,7 @@ def test_portfolio_reads_full_history_and_ignores_the_cursor(
     result = run(client, **body)
 
     assert policy_of("portfolio").use_cursor is False
-    assert "Projects" in result["artifact"]["body_markdown"]
+    assert "## 프로젝트" in result["artifact"]["body_markdown"]
     assert all("since_sha" not in args for args in github.args_for("list_commits"))
 
 
@@ -234,9 +234,9 @@ def test_portfolio_and_resume_are_different_documents_from_one_snapshot(
     two = run(client, **document("resume"))["artifact"]["body_markdown"]
 
     assert one != two
-    assert one.startswith("# 홍길동 포트폴리오") and "🚀 Projects" in one
-    assert two.startswith("# 홍길동 이력서") and "## 경력" in two
-    assert "🚀 Projects" not in two and "## 경력" not in one
+    assert one.startswith("# 홍길동") and "## 프로젝트" in one
+    assert two.startswith("# 홍길동") and "## 주요 작업" in two
+    assert "## 프로젝트" not in two and "## 주요 작업" not in one
     assert [page["title"] for page in notion.logs] == [
         "포트폴리오 2026-08-20",
         "이력서 2026-08-20",

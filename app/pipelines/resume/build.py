@@ -18,8 +18,8 @@ from app.pipelines.resume import sections
 
 KIND = "resume"
 INSTRUCTION = (
-    "아래 개발자의 GitHub 활동 근거만 보고 이력서 소개를 1~2문장으로 써라. "
-    "직무 지원용이므로 사실과 규모 위주로 쓰고 형용사를 쓰지 않는다. "
+    "EVIDENCE만 보고 소개를 한국어로 쓴다. 만든 사실만 쓴다. "
+    "성격이나 미션 문장은 쓰지 않는다. 분량은 근거가 닿는 만큼만. "
     "각 문장은 근거 id를 함께 반환한다."
 )
 
@@ -68,7 +68,6 @@ async def build(
     unresolved = [
         field
         for field, value in (
-            ("summary_md", summary_md),
             ("skills_md", skills_md),
             ("projects_md", projects_md),
             ("contact_md", fields.contact_md.strip()),
