@@ -49,8 +49,10 @@ async def complete(
     schema: type[T],
     *,
     instruction: str,
-    evidence: Evidence,
+    evidence: Evidence | None = None,
+    digest: dict[str, Any] | None = None,
     extra: dict[str, Any] | None = None,
+    timeout: float | None = None,
     llm: Any | None = None,
 ) -> T | None:
     """Ask the model for a structured answer, or None if anything goes wrong."""
@@ -59,7 +61,10 @@ async def complete(
         return None
     from langchain_core.messages import HumanMessage, SystemMessage
 
-    payload = {"evidence": _digest(evidence), **(extra or {})}
+    extras = dict(extra or {})
+    extras.pop("evidence", None)
+    facts = digest if digest is not None else _digest(evidence or Evidence())
+    payload = {**extras, "evidence": facts}
     messages = [
         SystemMessage(content=SYSTEM_RULES),
         HumanMessage(
@@ -70,10 +75,10 @@ async def complete(
             )
         ),
     ]
-    timeout = float(os.environ.get("LLM_TIMEOUT", "60"))
+    limit = float(os.environ.get("LLM_TIMEOUT", "60") if timeout is None else timeout)
     try:
         return await asyncio.wait_for(
-            model.with_structured_output(schema).ainvoke(messages), timeout=timeout
+            model.with_structured_output(schema).ainvoke(messages), timeout=limit
         )
     except Exception as exc:
         logger.warning("llm generation dropped: %s", type(exc).__name__)
@@ -87,6 +92,18 @@ def keep_grounded(items: Sequence[GroundedText], allowed: set[str]) -> list[Grou
         ids = [i for i in item.evidence_ids if i in allowed]
         if text and ids:
             kept.append(GroundedText(text=text, evidence_ids=ids))
+    return kept
+
+
+WORK_PREFIXES = ("commit:", "pr:", "issue:")
+
+
+def keep_work(items: Sequence[GroundedText], allowed: set[str]) -> list[GroundedText]:
+    """Project work may not lean on a repo id alone."""
+    kept: list[GroundedText] = []
+    for item in keep_grounded(items, allowed):
+        if any(source.startswith(WORK_PREFIXES) for source in item.evidence_ids):
+            kept.append(item)
     return kept
 
 
@@ -122,6 +139,10 @@ def _digest(evidence: Evidence) -> dict[str, Any]:
                     {"id": h.id, "subject": h.subject, "change_type": h.change_type}
                     for h in p.highlights
                 ],
+                "pull_requests": [
+                    {"id": item.id, "title": item.title} for item in p.pull_requests
+                ],
+                "issues": [{"id": item.id, "title": item.title} for item in p.issues],
             }
             for p in evidence.projects
         ],

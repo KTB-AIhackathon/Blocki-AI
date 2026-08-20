@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 from datetime import datetime, timezone
 
 from app.contracts import (
@@ -120,10 +121,15 @@ async def build_portfolio(
     llm=None,
     projects: list[ProjectFacts] | None = None,
     evidence: Evidence | None = None,
+    deadline: float | None = None,
 ):
     chosen = projects if projects is not None else four_projects()
     return await portfolio_build(
-        job(), snapshot(), evidence if evidence is not None else evidence_of(chosen), llm=llm
+        job(),
+        snapshot(),
+        evidence if evidence is not None else evidence_of(chosen),
+        llm=llm,
+        deadline=deadline,
     )
 
 
@@ -326,3 +332,184 @@ async def test_intro_refs_cite_only_used_evidence() -> None:
         ref.source_id for ref in proposal.evidence_refs if ref.field == "summary_md"
     }
     assert summary_ids == {"repo:acme/alpha"}
+
+
+def _empty_pitch() -> dict:
+    return {"pitch": []}
+
+
+def _empty_work() -> dict:
+    return {"work_ids": []}
+
+
+def _slot_llm(
+    *,
+    selected: list[str],
+    intro: list[dict] | None = None,
+    pitches: list[dict] | None = None,
+    works: list[dict] | None = None,
+) -> FakeLLM:
+    payloads: list = [{"selected_ids": selected, "reason": "test"}]
+    for index, _project_id in enumerate(selected):
+        payloads.append(pitches[index] if pitches and index < len(pitches) else _empty_pitch())
+        payloads.append(works[index] if works and index < len(works) else _empty_work())
+    payloads.append(
+        {
+            "intro": intro
+            or [
+                {
+                    "text": "결제와 알림을 다루는 백엔드를 만들었습니다.",
+                    "evidence_ids": ["repo:acme/alpha"],
+                }
+            ]
+        }
+    )
+    return FakeLLM(payloads)
+
+
+async def test_curator_order_replaces_score_order() -> None:
+    llm = _slot_llm(selected=["repo:acme/delta", "repo:acme/alpha", "repo:acme/beta"])
+    proposal = await build_portfolio(llm)
+
+    assert project_headings(proposal.body_markdown) == [
+        "### delta",
+        "### alpha",
+        "### beta",
+    ]
+    assert "### gamma" not in proposal.body_markdown
+    assert "cards" not in proposal.model_dump()
+    assert "selected_ids" not in proposal.model_dump()
+
+
+async def test_curator_may_keep_two_projects() -> None:
+    llm = _slot_llm(selected=["repo:acme/alpha", "repo:acme/gamma"])
+    proposal = await build_portfolio(llm)
+    assert project_headings(proposal.body_markdown) == ["### alpha", "### gamma"]
+
+
+async def test_fake_ids_are_dropped_and_filled_by_score() -> None:
+    llm = _slot_llm(selected=["repo:made/up", "repo:acme/delta"])
+    proposal = await build_portfolio(llm)
+    assert project_headings(proposal.body_markdown)[0] == "### delta"
+    assert "### made" not in proposal.body_markdown
+    assert len(project_headings(proposal.body_markdown)) == 3
+
+
+async def test_q1_pitch_and_q2_ids_use_original_titles() -> None:
+    sha = "a" * 12
+    commit_id = f"commit:acme/alpha:{sha}"
+    alpha = _project(
+        "alpha",
+        sha=sha,
+        subject="one",
+        commits=20,
+        highlights=[_highlight("acme/alpha", sha, "one")],
+    )
+    llm = _slot_llm(
+        selected=["repo:acme/alpha", "repo:acme/beta"],
+        pitches=[
+            {
+                "pitch": [
+                    {"text": "결제 서비스를 만들었습니다.", "evidence_ids": ["repo:acme/alpha"]}
+                ]
+            }
+        ],
+        works=[{"work_ids": [commit_id], "text": "결제 검증을 붙였습니다."}],
+        intro=[],
+    )
+    proposal = await build_portfolio(llm, [alpha, *_project_tail()])
+    body = proposal.body_markdown
+    assert "결제 서비스를 만들었습니다." in body
+    assert "결제 검증을 붙였습니다." not in body
+    assert "- one" in body.split("### beta")[0]
+
+
+async def test_repo_only_work_ids_fall_back_to_highlights() -> None:
+    llm = _slot_llm(
+        selected=["repo:acme/alpha", "repo:acme/beta", "repo:acme/gamma"],
+        works=[{"work_ids": ["repo:acme/alpha"]}],
+        intro=[],
+    )
+    proposal = await build_portfolio(llm)
+    assert "쿠버네티스" not in proposal.body_markdown
+    assert "feat: 결제 API 구현" in proposal.body_markdown
+
+
+async def test_one_fill_error_falls_back_that_card() -> None:
+    llm = FakeLLM(
+        [
+            {
+                "selected_ids": ["repo:acme/alpha", "repo:acme/beta", "repo:acme/gamma"],
+                "reason": "",
+            },
+            RuntimeError("q1 exploded"),
+            _empty_work(),
+            _empty_pitch(),
+            _empty_work(),
+            _empty_pitch(),
+            _empty_work(),
+            {
+                "intro": [
+                    {
+                        "text": "결제와 알림을 다루는 백엔드를 만들었습니다.",
+                        "evidence_ids": ["repo:acme/alpha"],
+                    }
+                ]
+            },
+        ]
+    )
+    proposal = await build_portfolio(llm)
+    assert proposal.status == "proposed"
+    assert "> alpha 서비스" in proposal.body_markdown
+    assert "feat: 결제 API 구현" in proposal.body_markdown
+
+
+async def test_unselected_repos_are_not_filled() -> None:
+    llm = _slot_llm(selected=["repo:acme/alpha", "repo:acme/beta", "repo:acme/gamma"])
+    proposal = await build_portfolio(llm)
+    assert "### delta" not in proposal.body_markdown
+    assert llm.schemas.count("_SelectDraft") == 1
+    assert llm.schemas.count("_PitchDraft") == 3
+    assert llm.schemas.count("_WorkDraft") == 3
+    assert llm.schemas.count("_WriteDraft") == 1
+    fill_prompts = [
+        prompt
+        for prompt, name in zip(llm.prompts, llm.schemas)
+        if name in {"_PitchDraft", "_WorkDraft"}
+    ]
+    assert all("delta 서비스" not in prompt for prompt in fill_prompts)
+
+
+async def test_intro_sees_filled_pitch_not_unselected_repo() -> None:
+    llm = _slot_llm(
+        selected=["repo:acme/alpha", "repo:acme/beta"],
+        pitches=[
+            {
+                "pitch": [
+                    {"text": "알파 결제를 만들었습니다.", "evidence_ids": ["repo:acme/alpha"]}
+                ]
+            }
+        ],
+    )
+    await build_portfolio(llm)
+    intro = next(prompt for prompt, name in zip(llm.prompts, llm.schemas) if name == "_WriteDraft")
+    assert "알파 결제를 만들었습니다." in intro
+    assert "delta 서비스" not in intro
+
+
+async def test_expired_deadline_keeps_score_order() -> None:
+    llm = _slot_llm(selected=["repo:acme/delta", "repo:acme/alpha", "repo:acme/beta"])
+    proposal = await build_portfolio(llm, deadline=time.monotonic())
+    assert project_headings(proposal.body_markdown) == [
+        "### alpha",
+        "### beta",
+        "### gamma",
+    ]
+
+
+def _project_tail() -> list[ProjectFacts]:
+    return [
+        _project("beta", sha="b" * 12, subject="feat: 알림 발송", commits=12),
+        _project("gamma", sha="c" * 12, subject="fix: 타임아웃 수정", commits=8),
+        _project("delta", sha="d" * 12, subject="chore: 설정 정리", commits=2),
+    ]

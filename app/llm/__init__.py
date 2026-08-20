@@ -1,5 +1,5 @@
 from app.llm.client import get_llm, provider, reset
-from app.llm.guard import GroundedText, complete, enabled, keep_grounded
+from app.llm.guard import GroundedText, complete, enabled, keep_grounded, keep_work
 
 __all__ = [
     "GroundedText",
@@ -7,6 +7,7 @@ __all__ = [
     "enabled",
     "get_llm",
     "keep_grounded",
+    "keep_work",
     "provider",
     "reset",
 ]

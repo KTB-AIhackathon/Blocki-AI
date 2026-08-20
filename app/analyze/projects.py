@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 from collections.abc import Callable
 from datetime import datetime
-from typing import TypeVar
+from typing import Literal, TypeVar
 
 from app.contracts import (
     ChangeType,
@@ -14,6 +14,7 @@ from app.contracts import (
     ProjectFacts,
     RepoActivity,
     ViewerIdentity,
+    WorkItem,
     as_utc,
 )
 
@@ -51,6 +52,7 @@ _KEYWORDS: tuple[tuple[ChangeType, tuple[str, ...]], ...] = (
 _HIGHLIGHT_ORDER: tuple[ChangeType, ...] = ("feat", "perf", "fix", "refactor", "build")
 _RECENT_DAYS = 90
 _YEAR_DAYS = 365
+_MAX_WORK_ITEMS = 3
 
 
 def facts_of(
@@ -80,6 +82,20 @@ def facts_of(
             lambda issue: [issue.author, *issue.assignees],
         )),
         highlights=_highlights(repo.full_name, mine, max_highlights),
+        pull_requests=_owned_work(
+            [pr for pr in repo.pull_requests if pr.merged],
+            viewer,
+            repo.full_name,
+            "pr",
+            lambda pr: [pr.author],
+        ),
+        issues=_owned_work(
+            [issue for issue in repo.issues if issue.state.casefold() == "closed"],
+            viewer,
+            repo.full_name,
+            "issue",
+            lambda issue: [issue.author, *issue.assignees],
+        ),
     )
     facts.score = _score(facts, repo, now=now)
     return facts
@@ -131,6 +147,33 @@ def _fallback(
     if not any(name for item in items for name in names(item)):
         return items
     return []
+
+
+def _owned_work(
+    items: list[T],
+    viewer: ViewerIdentity,
+    repo: str,
+    source_type: Literal["pr", "issue"],
+    names: Callable[[T], list[str | None]],
+) -> list[WorkItem]:
+    """Titles the user can defend. No fallback — a stranger's PR is not a highlight."""
+    owned = [item for item in items if any(viewer.owns(name) for name in names(item))]
+    owned.sort(key=lambda item: (-_epoch(as_utc(getattr(item, "updated_at", None))), -int(item.number)))
+    out: list[WorkItem] = []
+    for item in owned[:_MAX_WORK_ITEMS]:
+        title = (getattr(item, "title", None) or "").strip()
+        if not title:
+            continue
+        out.append(
+            WorkItem(
+                id=f"{source_type}:{repo}#{item.number}",
+                repo=repo,
+                number=int(item.number),
+                title=title,
+                source_type=source_type,
+            )
+        )
+    return out
 
 
 def _highlights(repo: str, commits: list[CommitSummary], limit: int) -> list[CommitFact]:

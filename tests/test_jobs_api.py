@@ -224,3 +224,33 @@ async def test_document_job_ignores_a_stale_cursor(monkeypatch: pytest.MonkeyPat
 
     assert result.ok is True
     assert "## 프로젝트" in (result.artifact.body_markdown if result.artifact else "")
+
+
+async def test_portfolio_job_uses_200_second_budget(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    seen: dict[str, float] = {}
+
+    async def fake_wait_for(coro, timeout):  # noqa: ANN001
+        seen["timeout"] = timeout
+        return await coro
+
+    monkeypatch.delenv("JOB_TIMEOUT", raising=False)
+    monkeypatch.setattr("app.api.jobs.asyncio.wait_for", fake_wait_for)
+    job = JobRequest(
+        job_id="j1",
+        user_id="u1",
+        job_type="portfolio",
+        repos=[{"owner": "acme", "name": "demo"}],
+        document=DocumentSpec(kind="portfolio", profile_fields=FIELDS),
+    )
+    fake = FakeGitHub()
+    real = __import__("app.collect.github", fromlist=["collect_github"]).collect_github
+
+    async def collect(req, github_pat, **_kwargs):
+        return await real(req, github_pat, call_tool=fake)
+
+    monkeypatch.setattr("app.api.jobs.collect_github", collect)
+    result = await handle_job(job, PAT)
+    assert result.ok is True
+    assert seen["timeout"] == 200

@@ -57,6 +57,7 @@ class Pipeline:
     build: Builder
     evidence: EvidenceSpec | None = None
     requires: str | None = None
+    timeout_seconds: float = 90
 
 
 REGISTRY: dict[str, Pipeline] = {
@@ -69,8 +70,9 @@ REGISTRY: dict[str, Pipeline] = {
         kind="portfolio",
         policy=DOCUMENT_POLICY,
         build=portfolio.build,
-        evidence=EvidenceSpec(max_projects=5, max_highlights=5),
+        evidence=EvidenceSpec(max_projects=6, max_highlights=5),
         requires="document",
+        timeout_seconds=200,
     ),
     "resume": Pipeline(
         kind="resume",
@@ -105,7 +107,11 @@ def evidence_for(pipeline: Pipeline, snapshot: GitHubSnapshot) -> Evidence:
 
 
 async def run(
-    job: JobRequest, snapshot: GitHubSnapshot, *, llm: Any | None = None
+    job: JobRequest,
+    snapshot: GitHubSnapshot,
+    *,
+    llm: Any | None = None,
+    deadline: float | None = None,
 ) -> ArtifactProposal:
     pipeline = resolve(job.job_type)
     if pipeline is None:
@@ -122,7 +128,12 @@ async def run(
         )
     else:
         evidence = evidence_for(pipeline, snapshot)
-        proposal = await pipeline.build(job, snapshot, evidence, llm=llm)
+        if pipeline.kind == "portfolio":
+            proposal = await pipeline.build(
+                job, snapshot, evidence, llm=llm, deadline=deadline
+            )
+        else:
+            proposal = await pipeline.build(job, snapshot, evidence, llm=llm)
     proposal.proposal_id = str(uuid4())
     return fill_proposal_digests(proposal, snapshot.snapshot_digest)
 

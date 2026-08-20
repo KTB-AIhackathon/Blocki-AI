@@ -22,6 +22,7 @@ from app.contracts.evidence import (
     SkillCategory,
     SkillFact,
     ViewerIdentity,
+    WorkItem,
 )
 from app.contracts.execute import (
     ExecuteRequest,
@@ -125,6 +126,7 @@ __all__ = [
     "SnapshotSummary",
     "TemplateRef",
     "ViewerIdentity",
+    "WorkItem",
     "action_digest_of",
     "artifact_from",
     "as_utc",

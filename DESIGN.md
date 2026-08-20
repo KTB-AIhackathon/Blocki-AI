@@ -113,7 +113,8 @@ graph LR
 ```
 
 LangGraph 3노드: `collect → build → publish`. PAT와 Notion 토큰은 노드 클로저에만
-있고 state·응답·로그에 들어가지 않는다.
+있고 state·응답·로그에 들어가지 않는다. 포트폴리오 팀은 `pipelines.run` 안의 함수다
+(`folders` → `select` → `fill` → `intro`). 노드를 역할마다 쪼개지 않는다.
 
 `analyze`는 파이프라인이 `EvidenceSpec`을 선언한 경우에만 돈다. 진행 메모와 README는
 스냅샷을 그대로 쓴다.
@@ -171,7 +172,8 @@ graph LR
 
 순수 함수. 네트워크·LLM·템플릿 없음. 문장을 만들지 않고 **사실만** 만든다.
 
-- `projects.py` — 본인 커밋, 기여자 수, 기간, 머지 PR, 하이라이트(feat→perf→fix 순), 점수
+- `projects.py` — 본인 커밋, 기여자 수, 기간, 머지 PR 개수, 귀속된 PR/이슈 제목(각 3개,
+  fallback 없음), 하이라이트(feat→perf→fix 순), 점수
 - `skills.py` — 언어 바이트 + 인식 가능한 topic + 매니페스트 → 정규화된 스킬.
   `pyproject.toml`은 스킬이 아니고, 5% 미만 언어는 버린다(최상위 1개는 남긴다).
 - `repos.py` — fork/archived 제외, 본인 커밋 없는 레포 제외, 점수순 상위 N개
@@ -187,12 +189,14 @@ graph LR
 | job_type | kind | evidence | 필수 입력 |
 | --- | --- | --- | --- |
 | `progress_summary` | progress | 없음 | — |
-| `portfolio` | portfolio | 5개 프로젝트 / 5개 하이라이트 | `document`, `name` |
+| `portfolio` | portfolio | 6개 후보 / 선정 최대 3 / 5개 하이라이트 | `document`, `name` |
 | `resume` | resume | 3개 프로젝트 / 3개 하이라이트 | `document`, `name`, `experience_md`, `education_md` |
 | `readme_proposal` | readme | 없음 | `readme` |
 
-포폴과 이력서는 같은 Evidence를 쓰지만 다른 문서를 만든다. 포폴은 활동 표·프로젝트
-상세·커밋 SHA까지 보여주고, 이력서는 한 줄 요약과 성과 3개로 줄인다.
+포폴과 이력서는 같은 Evidence를 쓰지만 다른 문서를 만든다. 포폴은 폴더를 펼친 뒤
+큐레이터가 최대 3개를 고르고, 고른 카드만 Q1(한 줄)·Q2(작업 id)로 채운 다음 소개를
+쓴다. SHA는 화면에 내지 않는다. 이력서는 한 줄 요약과 성과 3개로 줄인다. 포폴 job
+기본 한도는 200초다.
 
 ### llm
 

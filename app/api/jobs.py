@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import time
 from typing import TypedDict
 
 from fastapi import APIRouter
@@ -36,7 +37,6 @@ from app.publish import publish_artifact
 
 router = APIRouter()
 
-DEFAULT_TIMEOUT = "90"
 BLOCKING_STATUSES = ("failed", "blocked")
 
 
@@ -85,12 +85,13 @@ async def handle_job(req: JobRequest, github_pat: str, notion_token: str = "") -
             JobError(code="validation", message=f"unsupported job_type: {req.job_type}"),
         )
 
-    graph = _compile(req, pipeline, pat=pat, notion_token=(notion_token or "").strip())
+    timeout = float(os.environ.get("JOB_TIMEOUT", pipeline.timeout_seconds))
+    deadline = time.monotonic() + timeout
+    graph = _compile(
+        req, pipeline, pat=pat, notion_token=(notion_token or "").strip(), deadline=deadline
+    )
     try:
-        out = await asyncio.wait_for(
-            graph.ainvoke({}),
-            timeout=float(os.environ.get("JOB_TIMEOUT", DEFAULT_TIMEOUT)),
-        )
+        out = await asyncio.wait_for(graph.ainvoke({}), timeout=timeout)
     except GitHubCollectError as exc:
         return _failed(req.job_id, exc.error)
     except asyncio.TimeoutError:
@@ -115,7 +116,14 @@ async def handle_job(req: JobRequest, github_pat: str, notion_token: str = "") -
     )
 
 
-def _compile(req: JobRequest, pipeline: pipelines.Pipeline, *, pat: str, notion_token: str):
+def _compile(
+    req: JobRequest,
+    pipeline: pipelines.Pipeline,
+    *,
+    pat: str,
+    notion_token: str,
+    deadline: float | None = None,
+):
     async def collect(_state: _State) -> _State:
         snapshot = await collect_github(
             CollectRequest(
@@ -131,7 +139,7 @@ def _compile(req: JobRequest, pipeline: pipelines.Pipeline, *, pat: str, notion_
         return {"snapshot": snapshot}
 
     async def build(state: _State) -> _State:
-        proposal = await pipelines.run(req, state["snapshot"])
+        proposal = await pipelines.run(req, state["snapshot"], deadline=deadline)
         return {"proposal": proposal, "artifact": artifact_from(proposal)}
 
     async def publish(state: _State) -> _State:

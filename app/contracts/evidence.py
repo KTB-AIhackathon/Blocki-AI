@@ -50,6 +50,14 @@ class CommitFact(BaseModel):
     committed_at: datetime | None = None
 
 
+class WorkItem(BaseModel):
+    id: str
+    repo: str
+    number: int
+    title: str
+    source_type: Literal["pr", "issue"]
+
+
 class ProjectFacts(BaseModel):
     id: str
     repo: str
@@ -65,6 +73,8 @@ class ProjectFacts(BaseModel):
     closed_issues: int = 0
     languages: list[SkillFact] = Field(default_factory=list)
     highlights: list[CommitFact] = Field(default_factory=list)
+    pull_requests: list[WorkItem] = Field(default_factory=list)
+    issues: list[WorkItem] = Field(default_factory=list)
     score: float = 0.0
 
     @property
@@ -90,6 +100,8 @@ class Evidence(BaseModel):
         for project in self.projects:
             found |= {c.id for c in project.highlights}
             found |= {s.id for s in project.languages}
+            found |= {item.id for item in project.pull_requests}
+            found |= {item.id for item in project.issues}
         return found
 
     def is_empty(self) -> bool:

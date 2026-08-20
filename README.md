@@ -38,7 +38,7 @@ app/
 | `BLOCKI_LLM_MODEL` | 아니오 | 로컬 기본 `gpt-5.6`, 배포 기본 `claude-sonnet-4-5` |
 | `BLOCKI_LLM_EFFORT` | 아니오 | Codex 추론. 로컬 기본 `xhigh` |
 | `ANTHROPIC_API_KEY` | 아니오 | 있으면 `auto`가 Claude를 고른다 |
-| `JOB_TIMEOUT` | 아니오 | 초. 기본 `90` |
+| `JOB_TIMEOUT` | 아니오 | 초. 있으면 모든 job을 덮어쓴다. 없으면 포폴 200, 나머지 90 |
 | `PORT` | 아니오 | 기본 `8000` |
 
 ```bash

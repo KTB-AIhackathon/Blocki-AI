@@ -15,6 +15,7 @@ from app.contracts import (
     ProjectFacts,
     SkillFact,
     TemplateRef,
+    WorkItem,
 )
 
 
@@ -90,6 +91,12 @@ def project_ref(field: str, project: ProjectFacts) -> EvidenceRef:
 def commit_ref(field: str, commit: CommitFact) -> EvidenceRef:
     return EvidenceRef(
         field=field, repo=commit.repo, source_type="commit", source_id=commit.id
+    )
+
+
+def work_ref(field: str, item: WorkItem) -> EvidenceRef:
+    return EvidenceRef(
+        field=field, repo=item.repo, source_type=item.source_type, source_id=item.id
     )
 
 

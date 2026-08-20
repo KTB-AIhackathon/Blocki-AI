@@ -213,6 +213,84 @@ def test_projects_rank_by_contribution_then_truncate() -> None:
     assert any("상위 1개만" in w for w in evidence.warnings)
 
 
+def test_owned_pr_and_issue_titles_become_work_items() -> None:
+    repo = a_repo(
+        pull_requests=[
+            PrSummary(
+                number=4, title="결제 검증", state="closed", merged=True,
+                author="alice", updated_at=when(1),
+            ),
+            PrSummary(
+                number=2, title="남의 PR", state="closed", merged=True,
+                author="bob", updated_at=when(0),
+            ),
+            PrSummary(
+                number=1, title="예전 작업", state="closed", merged=True,
+                author="alice", updated_at=when(20),
+            ),
+        ],
+        issues=[
+            IssueSummary(
+                number=9, title="내가 닫은 이슈", state="closed",
+                author="alice", updated_at=when(2),
+            ),
+            IssueSummary(
+                number=3, title="남의 이슈", state="closed",
+                author="bob", updated_at=when(1),
+            ),
+        ],
+    )
+    facts = projects.facts_of(repo, ALICE, now=NOW)
+
+    assert [item.id for item in facts.pull_requests] == ["pr:acme/demo#4", "pr:acme/demo#1"]
+    assert [item.title for item in facts.pull_requests] == ["결제 검증", "예전 작업"]
+    assert [item.id for item in facts.issues] == ["issue:acme/demo#9"]
+    assert facts.merged_prs == 2
+    assert facts.closed_issues == 1
+
+
+def test_unattributable_titles_are_not_lifted() -> None:
+    repo = a_repo(
+        pull_requests=[PrSummary(number=1, title="익명 PR", state="closed", merged=True)],
+        issues=[IssueSummary(number=2, title="익명 이슈", state="closed")],
+    )
+    facts = projects.facts_of(repo, ALICE, now=NOW)
+
+    assert facts.merged_prs == 1
+    assert facts.closed_issues == 1
+    assert facts.pull_requests == []
+    assert facts.issues == []
+
+
+def test_work_item_ids_are_part_of_evidence() -> None:
+    repo = a_repo(
+        pull_requests=[
+            PrSummary(number=7, title="내 PR", state="closed", merged=True, author="alice"),
+        ]
+    )
+    evidence = analyze(snapshot(repo), now=NOW)
+    ids = evidence.ids()
+
+    assert "pr:acme/demo#7" in ids
+    assert f"repo:{evidence.projects[0].repo}" in ids
+    assert all(s.id in ids for s in evidence.skills)
+    assert all(h.id in ids for h in evidence.projects[0].highlights)
+
+
+def test_work_item_cap_keeps_the_newest_three() -> None:
+    repo = a_repo(
+        pull_requests=[
+            PrSummary(
+                number=n, title=f"PR {n}", state="closed", merged=True,
+                author="alice", updated_at=when(10 - n),
+            )
+            for n in range(1, 6)
+        ]
+    )
+    facts = projects.facts_of(repo, ALICE, now=NOW)
+    assert [item.number for item in facts.pull_requests] == [5, 4, 3]
+
+
 def test_evidence_ids_cover_every_rendered_source() -> None:
     evidence = analyze(snapshot(a_repo()), now=NOW)
     ids = evidence.ids()

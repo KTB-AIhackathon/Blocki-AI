@@ -229,6 +229,16 @@ def test_render_keeps_parent_heading_with_a_filled_child() -> None:
     assert "### 채워진 하위" in pruned
 
 
+def test_portfolio_budget_is_200_seconds() -> None:
+    portfolio = pipelines.resolve("portfolio")
+    resume = pipelines.resolve("resume")
+    assert portfolio is not None and resume is not None
+    assert portfolio.timeout_seconds == 200
+    assert portfolio.evidence is not None and portfolio.evidence.max_projects == 6
+    assert resume.timeout_seconds == 90
+    assert resume.evidence is not None and resume.evidence.max_projects == 3
+
+
 def test_render_substitution_cannot_execute_template_syntax() -> None:
     body = render.render(
         "portfolio", "v1", {"name": "홍길동", "summary_md": "{{skills_md}} {% raw %}"}
