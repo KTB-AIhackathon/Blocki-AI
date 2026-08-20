@@ -81,7 +81,7 @@ async def build(
     unresolved = [
         field
         for field, value in (
-            ("skills_md", skills_md if readme.get("기술") else ""),
+            ("skills_md", "" if skills_md.strip() == common.FILL_IN else skills_md),
             ("projects_md", projects_md),
             ("contact_md", fields.contact_md.strip()),
         )
