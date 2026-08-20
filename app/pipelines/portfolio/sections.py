@@ -10,6 +10,7 @@ from app.pipelines import common
 Section = tuple[str, list[EvidenceRef]]
 
 TOP_SKILLS_IN_SUMMARY = 4
+MAX_HIGHLIGHTS_SHOWN = 3
 
 
 def summary(evidence: Evidence, extra: list[GroundedText] | None = None) -> Section:
@@ -29,8 +30,7 @@ def summary(evidence: Evidence, extra: list[GroundedText] | None = None) -> Sect
         names = ", ".join(s.name for s in top)
         lines.append(f"주로 사용하는 기술은 {names} 입니다.")
         refs.extend(common.skill_ref("summary_md", s) for s in top)
-    span = common.period(evidence.period_start, evidence.period_end)
-    if span and evidence.projects:
+    elif (span := common.period(evidence.period_start, evidence.period_end)) and evidence.projects:
         lines.append(
             f"{span} 동안 프로젝트 {len(evidence.projects)}개에 "
             f"커밋 {evidence.my_commits}개를 남겼습니다."
@@ -67,17 +67,23 @@ def skills(evidence: Evidence) -> Section:
     grouped = skill_analysis.group_by_category(evidence.skills)
     if not grouped:
         return "", []
+    featured = [project.repo for project in evidence.projects]
     blocks: list[str] = []
     refs: list[EvidenceRef] = []
     for label, members in grouped:
-        bullets = [f"**{label}**", ""]
+        lines: list[str] = []
         for skill in members:
-            if skill.measured and skill.weight >= 0.01:
-                bullets.append(f"- {skill.name} ({skill.weight * 100:.0f}%)")
-            else:
-                bullets.append(f"- {skill.name}")
-            refs.append(common.skill_ref("skills_md", skill))
-        blocks.append("\n".join(bullets))
+            used = [repo for repo in featured if repo in skill.repos]
+            if not used:
+                continue
+            names = ", ".join(_repo_label(repo, featured) for repo in used)
+            lines.append(f"- {skill.name} — {names}")
+            refs.extend(
+                common.skill_ref("skills_md", skill.model_copy(update={"repos": [repo]}))
+                for repo in used
+            )
+        if lines:
+            blocks.append("\n".join([f"**{label}**", "", *lines]))
     return "\n\n".join(blocks), refs
 
 
@@ -86,21 +92,28 @@ def projects(
 ) -> Section:
     if not evidence.projects:
         return "", []
+    featured = [project.repo for project in evidence.projects]
     blocks: list[str] = []
     refs: list[EvidenceRef] = []
     for facts in evidence.projects:
-        block, block_refs = _project_block(facts, (summaries or {}).get(facts.id))
+        block, block_refs = _project_block(
+            facts, (summaries or {}).get(facts.id), featured
+        )
         blocks.append(block)
         refs.extend(block_refs)
     return "\n\n".join(blocks), refs
 
 
-def _project_block(facts: ProjectFacts, summary: GroundedText | None = None) -> Section:
+def _project_block(
+    facts: ProjectFacts,
+    summary: GroundedText | None,
+    featured: list[str],
+) -> Section:
     refs = [common.project_ref("projects_md", facts)]
-    parts = [f"### {facts.repo}", ""]
+    parts = [f"### {_repo_label(facts.repo, featured)}", ""]
     if summary is not None:
         parts.extend([summary.text.strip(), ""])
-    elif facts.description:
+    if facts.description:
         parts.extend([f"> {facts.description}", ""])
 
     meta: list[str] = []
@@ -119,12 +132,26 @@ def _project_block(facts: ProjectFacts, summary: GroundedText | None = None) -> 
         meta.append(f"- 저장소: {facts.url}")
     parts.extend(meta)
 
-    if summary is None and facts.highlights:
+    shown = [item for item in facts.highlights if (item.subject or "").strip()][
+        :MAX_HIGHLIGHTS_SHOWN
+    ]
+    if shown:
         parts.extend(["", "**주요 작업**", ""])
-        for highlight in facts.highlights:
-            parts.append(f"- {highlight.subject} (`{highlight.sha[:7]}`)")
+        for highlight in shown:
+            parts.append(f"- {highlight.subject.strip()}")
             refs.append(common.commit_ref("projects_md", highlight))
     return "\n".join(parts).rstrip(), refs
+
+
+def _short_name(repo: str) -> str:
+    return repo.rsplit("/", 1)[-1]
+
+
+def _repo_label(repo: str, featured: list[str]) -> str:
+    short = _short_name(repo)
+    if sum(1 for item in featured if _short_name(item) == short) > 1:
+        return repo
+    return short
 
 
 def _refs_from_grounded(

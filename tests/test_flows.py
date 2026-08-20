@@ -120,7 +120,7 @@ def test_portfolio_flows_from_github_to_spring_and_notion(
     assert body["artifact"]["kind"] == "portfolio"
     assert "홍길동" in markdown
     assert "Projects" in markdown
-    assert "acme/demo" in markdown
+    assert "https://github.com/acme/demo" in markdown
 
     assert body["notion"] == {
         "attempted": True,
