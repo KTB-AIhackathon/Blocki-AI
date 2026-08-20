@@ -117,6 +117,8 @@ class ArtifactProposal(BaseModel):
     action_digest: str | None = None
     warnings: list[str] = Field(default_factory=list)
     error: JobError | None = None
+    # 문서 제목은 Notion 페이지 제목이 되므로 본문에 이름을 또 쓰지 않는다.
+    owner_name: str = ""
     _publish_briefs: list[dict[str, str]] = PrivateAttr(default_factory=list)
     _hub_tail: str = PrivateAttr(default="")
 
@@ -218,9 +220,11 @@ def fill_proposal_digests(proposal: ArtifactProposal, snapshot_digest: str) -> A
 def artifact_from(proposal: ArtifactProposal) -> ArtifactPayload | None:
     if not (proposal.body_markdown or "").strip():
         return None
+    kind_title = ARTIFACT_TITLES.get(proposal.kind, proposal.kind)
+    owner = (proposal.owner_name or "").strip()
     return ArtifactPayload(
         kind=proposal.kind,
-        title=ARTIFACT_TITLES.get(proposal.kind, proposal.kind),
+        title=f"{owner} {kind_title}".strip(),
         body_markdown=proposal.body_markdown,
         proposal_id=proposal.proposal_id,
         template_ref=proposal.template_ref,

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import re
+
 from app.analyze import skills as skill_analysis
 from app.contracts import Evidence, EvidenceRef, ProjectFacts, SkillFact
 from app.llm.guard import GroundedText
@@ -10,7 +12,10 @@ from app.pipelines.portfolio.team import Dossier
 
 Section = tuple[str, list[EvidenceRef]]
 
-MAX_HIGHLIGHTS_SHOWN = 3
+MAX_GOALS = 3
+MAX_ACHIEVEMENTS = 4
+MAX_GROWTH = 4
+_AWARD = re.compile(r"수상|우수상|대상|최우수|입상|1위|2위|award|winner", re.IGNORECASE)
 
 
 def summary(evidence: Evidence, extra: list[GroundedText] | None = None) -> Section:
@@ -30,7 +35,7 @@ def skills(evidence: Evidence) -> Section:
     blocks: list[str] = []
     refs: list[EvidenceRef] = []
     for label, members in grouped:
-        names = [skill.name for skill in members if _used_in(skill, featured)]
+        names = list(dict.fromkeys(skill.name for skill in members if _used_in(skill, featured)))
         if not names:
             continue
         blocks.append(f"- **{label}**: {', '.join(names)}")
@@ -49,9 +54,9 @@ def projects(evidence: Evidence, dossiers: list[Dossier] | None = None) -> Secti
     by_id = {dossier.project_id: dossier for dossier in dossiers or []}
     blocks: list[str] = []
     refs: list[EvidenceRef] = []
-    for facts in evidence.projects:
+    for index, facts in enumerate(evidence.projects, 1):
         block, block_refs = _project_block(
-            facts, featured, evidence.skills, by_id.get(facts.id)
+            facts, index, featured, evidence.skills, by_id.get(facts.id)
         )
         blocks.append(block)
         refs.extend(block_refs)
@@ -64,93 +69,126 @@ def learning(_evidence: Evidence) -> Section:
 
 def _project_block(
     facts: ProjectFacts,
+    number: int,
     featured: list[str],
     catalogue: list[SkillFact],
     dossier: Dossier | None = None,
 ) -> Section:
     refs = [common.project_ref("projects_md", facts)]
-    parts = [f"### {_repo_label(facts.repo, featured)}", ""]
-    if facts.description:
-        parts.extend([f"> {facts.description}", ""])
+    refs.extend(common.commit_ref("projects_md", item) for item in facts.highlights)
+    refs.extend(common.work_ref("projects_md", item) for item in [*facts.pull_requests, *facts.issues])
+    refs.extend(common.til_ref("projects_md", item) for item in facts.til)
+    name = _repo_label(facts.repo, featured)
+    description = (facts.description or "").strip()
+    heading = f"### {number}. {name}"
+    if description:
+        heading += f" — {description}"
+    parts = [heading, "", "**개요**"]
+    award = (facts.award or "").strip() or _award_from_description(description)
+    if award:
+        parts.append(f"- 수상: {award}")
+    span = common.period(facts.started_at, facts.ended_at)
+    months = common.duration_months(facts.started_at, facts.ended_at)
+    if span and months is not None:
+        span += f" ({months}개월)"
+    # 개요는 GitHub이 대는 사실이라 비면 줄을 뺀다. 사용자가 채울 칸은 목표·성과·성장이다.
+    if span:
+        parts.append(f"- 기간: {span}")
+    parts.append(f"- 인원: {common.team_label(facts)}")
+    parts.append(f"- 역할: {common.contribution(facts)}")
+    stack = list({skill.name: skill for skill in catalogue if facts.repo in skill.repos}.values())
+    if not stack:
+        stack = list(facts.languages)
+    if stack:
+        parts.append(f"- 기술 스택: {', '.join(skill.name for skill in stack)}")
+    if facts.url:
+        parts.append(f"- 링크: {facts.url}")
+    refs.extend(common.skill_ref("projects_md", skill.model_copy(update={"repos": [facts.repo]})) for skill in stack)
     if dossier is not None:
         for item in dossier.pitch:
             text = item.text.strip()
-            if text and text != (facts.description or "").strip():
-                parts.append(text)
+            if text and text != description:
+                parts.append(f"- {text}")
                 refs.extend(
                     _refs_from_grounded("projects_md", [item], _evidence_for(facts, catalogue))
                 )
-                parts.append("")
-
-    meta: list[str] = []
-    span = common.period(facts.started_at, facts.ended_at)
-    if span:
-        months = common.duration_months(facts.started_at, facts.ended_at)
-        suffix = f" ({months}개월)" if months is not None else ""
-        meta.append(f"- 기간: {span}{suffix}")
-    meta.append(f"- 구성: {common.team_label(facts)}")
-    meta.append(f"- 기여: {common.contribution(facts)}")
-    parts.extend(meta)
-
-    stack = [skill for skill in catalogue if facts.repo in skill.repos]
-    if stack:
-        parts.append(f"- 기술: {', '.join(skill.name for skill in stack)}")
-        refs.extend(
-            common.skill_ref(
-                "projects_md", skill.model_copy(update={"repos": [facts.repo]})
-            )
-            for skill in stack
-        )
-    if facts.url:
-        parts.append(f"- 저장소: {facts.url}")
-
-    titles = _work_titles(facts, dossier.work_ids if dossier is not None else [])
-    if titles:
-        parts.extend(["", "**주요 작업**", ""])
-        for title, ref in titles[:MAX_HIGHLIGHTS_SHOWN]:
-            parts.append(f"- {title}")
-            refs.append(ref)
+    parts.extend(["", "**목표**"])
+    goals = _til_values(facts, "goal", MAX_GOALS)
+    if goals:
+        parts.extend(f"- {value}" for value, _item, _field in goals)
+        for _value, item, _field in goals:
+            refs.extend(common.til_field_refs("projects_md", item, "goal"))
     else:
-        shown = [item for item in facts.highlights if (item.subject or "").strip()][
-            :MAX_HIGHLIGHTS_SHOWN
-        ]
-        if shown:
-            parts.extend(["", "**주요 작업**", ""])
-            for highlight in shown:
-                parts.append(f"- {highlight.subject.strip()}")
-                refs.append(common.commit_ref("projects_md", highlight))
-    if facts.til:
-        parts.extend(["", "**배운 것**", ""])
-        for item in facts.til:
-            parts.append(f"- {item.date:%Y-%m-%d} · {item.title}")
-            refs.append(common.til_ref("projects_md", item))
+        parts.append(f"- {_fill_text()}")
+
+    parts.extend(["", "**성과**"])
+    achievements = _achievements(facts, dossier)
+    if achievements:
+        for achievement_number, (item, text, metric) in enumerate(achievements, 1):
+            parts.extend(["", f"#### {achievement_number}. {item.title}", f"- {text}"])
+            refs.extend(common.til_field_refs("projects_md", item, "result" if item.result else "attempt"))
+            if metric:
+                parts.append(f"- {metric}")
+                refs.extend(common.til_field_refs("projects_md", item, "metric"))
+    else:
+        parts.append(f"- {_fill_text()}")
+
+    parts.extend(["", "**성장**"])
+    growth = _til_values(facts, "learned", MAX_GROWTH) + _til_values(facts, "retro", MAX_GROWTH)
+    if growth:
+        for value, item, field in growth[:MAX_GROWTH]:
+            parts.append(f"- {value}")
+            refs.extend(common.til_field_refs("projects_md", item, field))
+    else:
+        parts.append(f"- {_fill_text()}")
     return "\n".join(parts).rstrip(), refs
 
 
-def _work_titles(
-    facts: ProjectFacts, work_ids: list[str]
-) -> list[tuple[str, EvidenceRef]]:
-    by_id: dict[str, tuple[str, EvidenceRef]] = {}
-    for highlight in facts.highlights:
-        title = (highlight.subject or "").strip()
-        if title:
-            by_id[highlight.id] = (title, common.commit_ref("projects_md", highlight))
-    for item in [*facts.pull_requests, *facts.issues]:
-        title = (item.title or "").strip()
-        if title:
-            by_id[item.id] = (title, common.work_ref("projects_md", item))
+def _til_values(
+    facts: ProjectFacts, field: str, limit: int
+) -> list[tuple[str, object, str]]:
+    values: list[tuple[str, object, str]] = []
     for item in facts.til:
-        title = (item.title or "").strip()
-        if title:
-            by_id[item.id] = (title, common.til_ref("projects_md", item))
-    out: list[tuple[str, EvidenceRef]] = []
-    for source_id in work_ids:
-        found = by_id.get(source_id)
-        if found is not None:
-            out.append(found)
-        if len(out) >= MAX_HIGHLIGHTS_SHOWN:
+        text = getattr(item, field).strip()
+        if not text:
+            continue
+        for value in text.splitlines():
+            if value.strip():
+                values.append((value.strip(), item, field))
+                if len(values) >= limit:
+                    return values
+    return values
+
+
+def _achievements(facts: ProjectFacts, dossier: Dossier | None) -> list[tuple[object, str, str]]:
+    by_id = {item.id: item for item in facts.til}
+    ordered = [by_id[item_id] for item_id in (dossier.work_ids if dossier else []) if item_id in by_id]
+    ordered.extend(item for item in facts.til if item not in ordered)
+    out: list[tuple[object, str, str]] = []
+    # 시도·결과가 적힌 TIL 이 하나라도 있으면 그것만 성과로 쓴다. 학습만 적힌 기록이
+    # 성과 자리를 밀어내면 안 된다. 그런 기록밖에 없을 때는 제목만 남긴다. 사용자가
+    # 그 프로젝트에 대해 쓴 것은 맞으니 버릴 이유는 없다.
+    has_work = any(item.attempt.strip() or item.result.strip() for item in ordered)
+    for item in ordered:
+        text = item.result.strip() or item.attempt.strip()
+        if not text and not has_work:
+            text = item.title.strip()
+        if not text:
+            continue
+        out.append((item, text.splitlines()[0], item.metric.text() if item.metric else ""))
+        if len(out) >= MAX_ACHIEVEMENTS:
             break
     return out
+
+
+
+
+def _award_from_description(description: str) -> str:
+    return description if _AWARD.search(description) else ""
+
+
+def _fill_text() -> str:
+    return common.FILL_IN.removeprefix("> ")
 
 
 def _evidence_for(facts: ProjectFacts, catalogue: list[SkillFact]) -> Evidence:

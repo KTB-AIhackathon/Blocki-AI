@@ -25,6 +25,7 @@ PLACEHOLDERS = (
     "learning_md",
     "experience_md",
     "education_md",
+    "selection_md",
 )
 
 TEMPLATES_ROOT = Path(__file__).resolve().parents[1] / "templates"
@@ -65,11 +66,16 @@ def prune_empty_sections(markdown: str) -> str:
     preamble, blocks = _split(markdown)
     keep = _survivors(blocks)
     parts: list[str] = []
+    top_sections = 0
     if preamble.strip():
         parts.append(preamble.strip())
-    for (_, heading, body), alive in zip(blocks, keep):
+    for (level, heading, body), alive in zip(blocks, keep):
         if not alive:
             continue
+        if level == 2:
+            if top_sections:
+                parts.append(_RULE)
+            top_sections += 1
         section = "\n".join([heading, "", _clean(body)]).rstrip()
         parts.append(section)
     text = "\n\n".join(p for p in parts if p.strip())

@@ -30,7 +30,8 @@ class RestSession:
         self, *, title: str, markdown: str, parent_id: str | None, icon: str | None = None
     ) -> tuple[str | None, str | None]:
         body: dict[str, Any] = {
-            "markdown": _with_title_heading(title, markdown),
+            "markdown": markdown or "",
+            "properties": {"title": title.strip()},
         }
         if parent_id:
             body["parent"] = {"type": "page_id", "page_id": _page_id(parent_id)}
@@ -38,7 +39,18 @@ class RestSession:
             body["parent"] = {"type": "workspace", "workspace": True}
         if icon:
             body["icon"] = {"type": "emoji", "emoji": icon}
-        data = await self._request("POST", "/pages", json=body)
+        try:
+            data = await self._request("POST", "/pages", json=body)
+        except RuntimeError as exc:
+            if not _title_property_rejected(exc):
+                raise
+            data = await self._request(
+                "POST",
+                "/pages",
+                json={key: value for key, value in body.items() if key != "properties"},
+            )
+            if data.get("id"):
+                await self._set_title(data["id"], title)
         return data.get("id"), data.get("url")
 
     async def read_page(self, target: str) -> Any:
@@ -53,16 +65,24 @@ class RestSession:
         }
 
     async def update_page(self, page_id: str, markdown: str, title: str | None = None) -> tuple[str | None, str | None]:
-        body = _with_title_heading(title, markdown) if title else (markdown or "")
         await self._request(
             "PATCH",
             f"/pages/{_page_id(page_id)}/markdown",
             json={
                 "type": "replace_content",
-                "replace_content": {"new_str": body},
+                "replace_content": {"new_str": markdown or ""},
             },
         )
+        if title:
+            await self._set_title(page_id, title)
         return page_id, None
+
+    async def _set_title(self, page_id: str, title: str) -> None:
+        await self._request(
+            "PATCH",
+            f"/pages/{_page_id(page_id)}",
+            json={"properties": {"title": title.strip()}},
+        )
 
     async def list_root_pages(self) -> list[dict[str, Any]]:
         """REST has no private-sidebar list. Do not fall back to workspace search."""
@@ -99,14 +119,9 @@ def _page_id(target: str) -> str:
     return page_id_from_url(target) or target.strip()
 
 
-def _with_title_heading(title: str, markdown: str) -> str:
-    """Notion uses the first `#` heading as the page title when properties.title is omitted."""
-    body = markdown or ""
-    heading = f"# {title.strip()}".strip()
-    stripped = body.lstrip()
-    if stripped == heading or stripped.startswith(heading + "\n"):
-        return body
-    return f"{heading}\n\n{body}" if body.strip() else heading
+def _title_property_rejected(error: RuntimeError) -> bool:
+    text = str(error)
+    return " 400 " in text or " 422 " in text
 
 
 def _title_of(page: dict[str, Any]) -> str | None:

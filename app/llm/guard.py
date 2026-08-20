@@ -134,6 +134,8 @@ def _digest(evidence: Evidence) -> dict[str, Any]:
                 "team": p.team,
                 "merged_prs": p.merged_prs,
                 "closed_issues": p.closed_issues,
+                "score": p.score,
+                "score_breakdown": p.score_breakdown,
                 "languages": [s.name for s in p.languages],
                 "highlights": [
                     {"id": h.id, "subject": h.subject, "change_type": h.change_type}
@@ -156,6 +158,17 @@ def _digest(evidence: Evidence) -> dict[str, Any]:
                 "body_markdown": item.body_markdown,
                 "page_id": item.page_id,
                 "tags": item.tags,
+                "fields": {
+                    "goal": item.goal,
+                    "problem": item.problem,
+                    "attempt": item.attempt,
+                    "result": item.result,
+                    "metric": item.metric.model_dump() if item.metric else None,
+                    "learned": item.learned,
+                    "retro": item.retro,
+                    "work_repo": item.work_repo,
+                },
+                "evidence_ids": sorted(item.field_ids()),
             }
             for item in evidence.til
         ]

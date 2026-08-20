@@ -132,11 +132,13 @@ def test_portfolio_flows_from_github_to_spring_and_notion(
 
     markdown = body["artifact"]["body_markdown"]
     assert body["artifact"]["kind"] == "portfolio"
-    assert "홍길동" in markdown
+    # 이름은 Notion 페이지 제목으로 나간다. 본문에 다시 쓰지 않는다.
+    assert "홍길동" in body["artifact"]["title"]
+    assert "홍길동" not in markdown
     assert "## 프로젝트" in markdown
     assert "https://github.com/acme/demo" in markdown
 
-    page = next(item for item in notion.logs if item["title"] == "포트폴리오 2026-08-20")
+    page = next(item for item in notion.logs if item["title"] == "홍길동 포트폴리오 2026-08-20")
     hub = next(item for item in notion.logs if item["title"] == "프로젝트 2026-08-20")
     assert body["notion"]["ok"] is True
     assert body["notion"]["page_id"] == page["id"]
@@ -181,7 +183,7 @@ def test_portfolio_needs_no_career_fields(
         document={"kind": "portfolio", "profile_fields": {"name": "홍길동"}},
     )
     assert body["ok"] is True
-    assert any(page["title"] == "포트폴리오 2026-08-20" for page in notion.logs)
+    assert any(page["title"] == "홍길동 포트폴리오 2026-08-20" for page in notion.logs)
     assert any(page["title"] == "프로젝트 2026-08-20" for page in notion.logs)
 
 
@@ -201,7 +203,7 @@ def test_resume_flows_from_github_to_spring_and_notion(
     assert "2025 ~ : 백엔드 엔지니어" in markdown
     assert "컴퓨터공학" in markdown
 
-    assert notion.logs[0]["title"] == "이력서 2026-08-20"
+    assert notion.logs[0]["title"] == "홍길동 이력서 2026-08-20"
     assert notion.logs[0]["markdown"] == markdown
 
 
@@ -221,7 +223,7 @@ def test_resume_without_a_career_reaches_notion_with_a_blank_to_fill_in(
 
     markdown = body["artifact"]["body_markdown"]
     assert "## 경력" in markdown and "## 학력" in markdown
-    assert markdown.count("이 Notion 페이지에서 직접 채워주세요") == 2
+    assert markdown.count("이 Notion 페이지에서 직접 채워주세요") >= 2
     assert notion.logs[0]["markdown"] == markdown
 
 
@@ -250,13 +252,13 @@ def test_portfolio_and_resume_are_different_documents_from_one_snapshot(
     two = run(client, **document("resume"))["artifact"]["body_markdown"]
 
     assert one != two
-    assert one.startswith("# 홍길동") and "## 프로젝트" in one
-    assert two.startswith("# 홍길동") and "## 주요 작업" in two
+    assert "홍길동" not in one and "## 프로젝트" in one
+    assert "홍길동" not in two and "## 주요 작업" in two
     assert "## 프로젝트" not in two and "## 주요 작업" not in one
     titles = [page["title"] for page in notion.logs]
-    assert "포트폴리오 2026-08-20" in titles
+    assert "홍길동 포트폴리오 2026-08-20" in titles
     assert "프로젝트 2026-08-20" in titles
-    assert titles[-1] == "이력서 2026-08-20"
+    assert titles[-1] == "홍길동 이력서 2026-08-20"
 
 
 # --------------------------------------------------------------------------

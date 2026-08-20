@@ -50,6 +50,27 @@ class CommitFact(BaseModel):
     committed_at: datetime | None = None
 
 
+class MetricFact(BaseModel):
+    before: str = ""
+    after: str = ""
+    unit: str = ""
+    criterion: str = ""
+
+    def text(self) -> str:
+        parts = []
+        if self.before and self.after:
+            parts.append(f"Before {self.before} → After {self.after}")
+        elif self.before:
+            parts.append(f"Before {self.before}")
+        elif self.after:
+            parts.append(f"After {self.after}")
+        if self.unit:
+            parts.append(f"단위: {self.unit}")
+        if self.criterion:
+            parts.append(f"측정 기준: {self.criterion}")
+        return " · ".join(parts)
+
+
 class WorkItem(BaseModel):
     id: str
     repo: str
@@ -65,6 +86,22 @@ class TilFact(BaseModel):
     body_markdown: str
     page_id: str
     tags: list[str] = Field(default_factory=list)
+    goal: str = ""
+    problem: str = ""
+    attempt: str = ""
+    result: str = ""
+    metric: MetricFact | None = None
+    learned: str = ""
+    retro: str = ""
+    work_repo: str = ""
+
+    def field_ids(self) -> set[str]:
+        fields = ("goal", "problem", "attempt", "result", "metric", "learned", "retro", "work_repo")
+        return {
+            f"{self.id}:{field}"
+            for field in fields
+            if getattr(self, field) not in ("", None)
+        }
 
 
 class ProjectFacts(BaseModel):
@@ -86,6 +123,8 @@ class ProjectFacts(BaseModel):
     issues: list[WorkItem] = Field(default_factory=list)
     til: list[TilFact] = Field(default_factory=list)
     score: float = 0.0
+    score_breakdown: dict[str, float] = Field(default_factory=dict)
+    award: str | None = None
 
     @property
     def team(self) -> bool:
@@ -105,24 +144,35 @@ class Evidence(BaseModel):
     warnings: list[str] = Field(default_factory=list)
     til: list[TilFact] = Field(default_factory=list)
     unmatched_til: list[TilFact] = Field(default_factory=list)
+    selection_candidates: list[ProjectFacts] = Field(default_factory=list)
+    selection_reason: str = ""
 
     def model_dump(self, *args, **kwargs):
         dumped = super().model_dump(*args, **kwargs)
         if not self.unmatched_til:
             dumped.pop("unmatched_til", None)
+        if not self.selection_candidates:
+            dumped.pop("selection_candidates", None)
+        if not self.selection_reason:
+            dumped.pop("selection_reason", None)
         return dumped
 
     def ids(self) -> set[str]:
-        found = {p.id for p in self.projects}
+        projects = self.projects
+        found = {p.id for p in projects}
         found |= {s.id for s in self.skills}
-        for project in self.projects:
+        for project in projects:
             found |= {c.id for c in project.highlights}
             found |= {s.id for s in project.languages}
             found |= {item.id for item in project.pull_requests}
             found |= {item.id for item in project.issues}
             found |= {item.id for item in project.til}
+            for item in project.til:
+                found |= item.field_ids()
         found |= {item.id for item in self.til}
         found |= {item.id for item in self.unmatched_til}
+        for item in [*self.til, *self.unmatched_til]:
+            found |= item.field_ids()
         return found
 
     def is_empty(self) -> bool:

@@ -40,6 +40,7 @@ def analyze(
         join.attach(facts, til_facts)
     for facts_of_repo, repo in zip(facts, usable):
         facts_of_repo.score = repos._score(facts_of_repo, repo, now=moment)
+        facts_of_repo.award = repos.award_of(repo)
     selected, warnings = repos.select(
         facts, limit=max_projects, require_own_commits=require_own_commits
     )
@@ -67,6 +68,7 @@ def analyze(
         warnings=[*snapshot.warnings, *warnings],
         til=til_facts,
         unmatched_til=unmatched_til,
+        selection_candidates=facts,
     )
     if til is None:
         return evidence

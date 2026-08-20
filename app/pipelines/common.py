@@ -105,6 +105,19 @@ def til_ref(field: str, til: TilFact) -> EvidenceRef:
     return EvidenceRef(field=field, repo="", source_type="til", source_id=til.id)
 
 
+def til_field_ref(field: str, til: TilFact, source_field: str) -> EvidenceRef:
+    return EvidenceRef(
+        field=field,
+        repo="",
+        source_type="til",
+        source_id=f"{til.id}:{source_field}",
+    )
+
+
+def til_field_refs(field: str, til: TilFact, *source_fields: str) -> list[EvidenceRef]:
+    return [til_ref(field, til), *[til_field_ref(field, til, source) for source in source_fields]]
+
+
 def work_ref(field: str, item: WorkItem) -> EvidenceRef:
     return EvidenceRef(
         field=field, repo=item.repo, source_type=item.source_type, source_id=item.id
@@ -151,3 +164,49 @@ def team_label(project: ProjectFacts) -> str:
     if project.contributors <= 1:
         return "개인 프로젝트"
     return f"팀 프로젝트 ({project.contributors}명)"
+
+
+def selection(
+    evidence: Evidence, selected: list[ProjectFacts] | None = None
+) -> tuple[str, list[EvidenceRef]]:
+    candidates = evidence.selection_candidates or evidence.projects
+    selected_repos = {project.repo for project in (selected or evidence.projects)}
+    labels = {
+        project.repo: _selection_label(project.repo, [item.repo for item in candidates])
+        for project in candidates
+    }
+    lines: list[str] = []
+    if evidence.selection_reason.strip():
+        lines.extend([f"> {evidence.selection_reason.strip()}", ""])
+    lines.extend(["| 저장소 | 점수 | 주요 근거 |", "|---|---:|---|"])
+    refs: list[EvidenceRef] = []
+    for project in sorted(candidates, key=lambda item: (-item.score, item.repo)):
+        dropped = project.repo not in selected_repos
+        repo = f"~~{labels[project.repo]}~~" if dropped else labels[project.repo]
+        lines.append(f"| {repo} | {project.score:.1f} | {_selection_evidence(project, dropped)} |")
+        refs.append(project_ref("selection_md", project))
+    return "\n".join(lines), refs
+
+
+def _selection_label(repo: str, repos: list[str]) -> str:
+    short = repo.rsplit("/", 1)[-1]
+    return repo if sum(item.rsplit("/", 1)[-1] == short for item in repos) > 1 else short
+
+
+def _selection_evidence(project: ProjectFacts, dropped: bool) -> str:
+    breakdown = project.score_breakdown
+    facts: list[str] = []
+    if project.my_commits:
+        facts.append(f"커밋 {project.my_commits}")
+    if project.til:
+        facts.append(f"TIL {len(project.til)}건")
+    if breakdown.get("team", 0) > 0:
+        facts.append(f"팀 {project.contributors}명")
+    if breakdown.get("award", 0) > 0:
+        facts.append("수상")
+    if breakdown.get("recency", 0) > 0:
+        facts.append("최근 활동")
+    penalized = breakdown.get("penalty", 0) < 0 or project.repo.rsplit("/", 1)[-1].casefold().endswith("-log")
+    if penalized:
+        facts.append("학습 저장소 감점으로 제외" if dropped else "학습 저장소 감점")
+    return " · ".join(facts or ["추가 근거 없음"])

@@ -20,20 +20,32 @@ def eligible(repo: RepoActivity) -> bool:
 
 
 def _score(facts: ProjectFacts, repo: RepoActivity, *, now: datetime) -> float:
-    score = math.log1p(max(facts.my_commits, 0)) * 2.0
-    score += facts.merged_prs * 3.0 + facts.closed_issues
-    score += min(repo.stars, 100) * 0.5
-    if facts.contributors > 1:
-        score += 5.0
+    facts.score_breakdown = _score_breakdown(facts, repo, now=now)
+    return round(sum(facts.score_breakdown.values()), 3)
+
+
+def _score_breakdown(facts: ProjectFacts, repo: RepoActivity, *, now: datetime) -> dict[str, float]:
+    breakdown = {
+        "commits": math.log1p(max(facts.my_commits, 0)) * 2.0,
+        "prs": facts.merged_prs * 3.0,
+        "issues": float(facts.closed_issues),
+        "stars": min(repo.stars, 100) * 0.5,
+        "team": 5.0 if facts.contributors > 1 else 0.0,
+        "duration": 0.0,
+        "til": len(facts.til) * 4.0,
+        "penalty": 0.0,
+        "award": 0.0,
+        "recency": 0.0,
+        "description": 1.0 if facts.description else 0.0,
+    }
     if facts.started_at and facts.ended_at:
-        score += max((facts.ended_at - facts.started_at).days, 0) / 30.0
-    score += len(facts.til) * 4.0
+        breakdown["duration"] = max((facts.ended_at - facts.started_at).days, 0) / 30.0
 
     name = repo.name.casefold()
     if name == repo.owner.casefold() or any(
         part in _NON_PROJECT_PARTS for part in re.split(r"[^a-z0-9]+", name) if part
     ) or name.endswith("-log"):
-        score -= 10.0
+        breakdown["penalty"] = -10.0
 
     text = " ".join(
         part
@@ -41,18 +53,26 @@ def _score(facts: ProjectFacts, repo: RepoActivity, *, now: datetime) -> float:
         if part
     )
     if _AWARD.search(text):
-        score += 10.0
+        breakdown["award"] = 10.0
 
     last = facts.ended_at or as_utc(repo.pushed_at)
     if last is not None:
         days = (now - last).days
         if days <= _RECENT_DAYS:
-            score += 10.0
+            breakdown["recency"] = 10.0
         elif days <= _YEAR_DAYS:
-            score += 4.0
-    if facts.description:
-        score += 1.0
-    return round(score, 3)
+            breakdown["recency"] = 4.0
+    return breakdown
+
+
+def award_of(repo: RepoActivity) -> str | None:
+    text = "\n".join(
+        part for part in (repo.description, repo.readme.content if repo.readme else None) if part
+    )
+    for line in text.splitlines():
+        if _AWARD.search(line):
+            return line.strip().lstrip("#- ")[:160]
+    return None
 
 
 def select(

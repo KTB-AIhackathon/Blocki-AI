@@ -34,7 +34,7 @@ Builder = Callable[..., Awaitable[ArtifactProposal]]
 # only the user's own, and dropping the rest here would make every team
 # repository look like solo work.
 DOCUMENT_POLICY = CollectPolicy(
-    needs=["profile_evidence", "activity"],
+    needs=["profile_evidence", "activity", "readme"],
     use_cursor=False,
     full_history=True,
     author_only=False,
@@ -80,7 +80,7 @@ REGISTRY: dict[str, Pipeline] = {
         kind="resume",
         policy=DOCUMENT_POLICY,
         build=resume.build,
-        evidence=EvidenceSpec(max_projects=3, max_highlights=3),
+        evidence=EvidenceSpec(max_projects=4, max_highlights=3),
         requires="document",
     ),
     "readme_proposal": Pipeline(

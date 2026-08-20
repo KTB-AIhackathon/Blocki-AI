@@ -50,7 +50,38 @@ def test_confirmed_link_wins_over_dates() -> None:
         body="작업 저장소: https://github.com/acme/demo",
         day=date(2025, 1, 1),
     )
+    entry.result = "연결했다."
 
+    assert join.attach(facts, [entry]) == []
+    assert facts[0].til == [entry]
+
+
+def test_repository_field_is_the_strongest_til_match() -> None:
+    facts = [
+        project("acme/one", description="one"),
+        project("acme/two", description="two"),
+    ]
+    entry = til(
+        "ambiguous title",
+        body="- **Repository:** https://github.com/acme/two",
+    )
+    entry.work_repo = "https://github.com/acme/two"
+    entry.result = "연결했다."
+
+    assert join.attach(facts, [entry]) == []
+    assert facts[0].til == []
+    assert facts[1].til == [entry]
+
+
+def test_learning_only_til_stays_unmatched_even_when_linked() -> None:
+    facts = [project("acme/one")]
+    entry = til(
+        "계획 기록",
+        body="- **Repository:** https://github.com/acme/one",
+    )
+    entry.work_repo = "https://github.com/acme/one"
+
+    # 조인은 "어느 프로젝트의 기록인가"만 판단한다. 성과로 쓸지는 렌더가 정한다.
     assert join.attach(facts, [entry]) == []
     assert facts[0].til == [entry]
 
@@ -63,6 +94,7 @@ def test_strong_match_uses_korean_description() -> None:
         )
     ]
     entry = til("공주비서 운영 기록")
+    entry.result = "운영했다."
 
     assert join.attach(facts, [entry]) == []
     assert facts[0].til == [entry]
@@ -150,6 +182,24 @@ def test_team_award_repo_outranks_100_commit_study_log() -> None:
     assert team.score > study.score
 
 
+def test_repo_score_keeps_a_breakdown_alongside_the_total() -> None:
+    facts = ProjectFacts(
+        id="repo:acme/demo",
+        repo="acme/demo",
+        my_commits=6,
+        contributors=2,
+        til=[til("기록", body="- **결과:** 완료")],
+        started_at=datetime(2026, 8, 1, tzinfo=timezone.utc),
+        ended_at=datetime(2026, 8, 20, tzinfo=timezone.utc),
+    )
+    repo = RepoActivity(owner="acme", name="demo", description="우수상 수상")
+
+    breakdown = repos._score_breakdown(facts, repo, now=NOW)
+
+    assert {"commits", "team", "duration", "til", "penalty", "award", "recency"} <= breakdown.keys()
+    assert repos._score(facts, repo, now=NOW) == round(sum(breakdown.values()), 3)
+
+
 @pytest.mark.asyncio
 async def test_portfolio_renders_til_contribution_and_three_projects() -> None:
     learned = til("노션 MCP 연결", day=date(2026, 7, 15))
@@ -188,13 +238,14 @@ async def test_portfolio_renders_til_contribution_and_three_projects() -> None:
     proposal = await build(job, snapshot, evidence)
 
     assert [line for line in proposal.body_markdown.splitlines() if line.startswith("### ")] == [
-        "### p0",
-        "### p1",
-        "### p2",
+        "### 1. p0",
+        "### 2. p1",
+        "### 3. p2",
     ]
-    assert "**배운 것**" in proposal.body_markdown
-    assert learned.title in proposal.body_markdown
-    assert "- 기여: 커밋 5개 (전체 5개 중 100%)" in proposal.body_markdown
+    assert "**성장**" in proposal.body_markdown
+    # 학습만 적힌 기록은 성과 자리를 밀어내지 않는다. 시도·결과가 있는 기록이 먼저다.
+    assert "**성과**" in proposal.body_markdown
+    assert "- 역할: 커밋 5개 (전체 5개 중 100%)" in proposal.body_markdown
 
 
 @pytest.mark.asyncio
@@ -261,6 +312,6 @@ async def test_rendered_project_block_contains_meta_and_learning() -> None:
     proposal = await build(job, snapshot, evidence)
 
     assert "- 기간: 2026.07 ~ 2026.08 (2개월)" in proposal.body_markdown
-    assert "- 구성: 팀 프로젝트 (4명)" in proposal.body_markdown
-    assert "- 기여: 커밋 34개 (전체 112개 중 30%)" in proposal.body_markdown
-    assert "**배운 것**" in proposal.body_markdown
+    assert "- 인원: 팀 프로젝트 (4명)" in proposal.body_markdown
+    assert "- 역할: 커밋 34개 (전체 112개 중 30%)" in proposal.body_markdown
+    assert "**성장**" in proposal.body_markdown

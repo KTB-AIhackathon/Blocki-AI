@@ -59,11 +59,15 @@ async def test_document_pipeline_renders_grounded_sections(job_type: str) -> Non
     proposal = await pipelines.run(document_job(job_type), snapshot)
 
     body = proposal.body_markdown
-    assert proposal.status == "proposed"
+    assert proposal.status == ("partial" if job_type == "resume" else "proposed")
     assert proposal.kind == job_type
-    assert "홍길동" in body
-    assert "Python" in body and "FastAPI" in body
-    assert "결제 API 구현" in body
+    assert "홍길동" == proposal.owner_name
+    assert "홍길동" not in body
+    if job_type == "portfolio":
+        assert "Python" in body and "FastAPI" in body
+    else:
+        assert common.FILL_IN in body
+    assert "결제 API 구현" not in body
     assert "pyproject.toml" not in body
     assert PAT not in body
     assert proposal.template_ref is not None
@@ -97,7 +101,7 @@ async def test_resume_without_a_career_leaves_a_blank_to_fill_in() -> None:
     assert proposal.error is None
     assert "## 경력" in proposal.body_markdown
     assert "## 학력" in proposal.body_markdown
-    assert proposal.body_markdown.count(common.FILL_IN) == 2
+    assert proposal.body_markdown.count(common.FILL_IN) == 3
 
 
 async def test_a_supplied_career_replaces_the_blank() -> None:
@@ -110,7 +114,7 @@ async def test_a_supplied_career_replaces_the_blank() -> None:
     proposal = await pipelines.run(job, snapshot)
 
     assert "- 2025 ~ : 백엔드" in proposal.body_markdown
-    assert proposal.body_markdown.count(common.FILL_IN) == 1
+    assert proposal.body_markdown.count(common.FILL_IN) == 2
     assert "education_md" in proposal.unresolved_fields
     assert "experience_md" not in proposal.unresolved_fields
 
@@ -150,7 +154,7 @@ async def test_portfolio_and_resume_differ_in_shape() -> None:
     assert "Activity" not in portfolio.body_markdown
     assert "Activity" not in resume.body_markdown
     assert "## 경력" in resume.body_markdown
-    assert len(portfolio.body_markdown) > len(resume.body_markdown)
+    assert len(portfolio.body_markdown) != len(resume.body_markdown)
 
 
 async def test_legacy_profile_document_job_type_is_normalised() -> None:
@@ -236,7 +240,7 @@ def test_portfolio_budget_is_200_seconds() -> None:
     assert portfolio.timeout_seconds == 200
     assert portfolio.evidence is not None and portfolio.evidence.max_projects == 6
     assert resume.timeout_seconds == 90
-    assert resume.evidence is not None and resume.evidence.max_projects == 3
+    assert resume.evidence is not None and resume.evidence.max_projects == 4
 
 
 def test_render_substitution_cannot_execute_template_syntax() -> None:

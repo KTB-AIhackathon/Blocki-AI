@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+
 import httpx
 import pytest
 
@@ -60,7 +62,7 @@ async def test_rest_create_omits_parent_at_the_private_root() -> None:
 
 
 @pytest.mark.asyncio
-async def test_rest_create_keeps_dated_title_when_body_already_has_h1() -> None:
+async def test_rest_create_sends_title_as_a_page_property_without_injecting_h1() -> None:
     captured: dict[str, str] = {}
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -75,9 +77,61 @@ async def test_rest_create_keeps_dated_title_when_body_already_has_h1() -> None:
     )
     await session.create_page(
         title="포트폴리오 2026-08-20",
-        markdown="# 김택규 포트폴리오\n\n본문",
+        markdown="본문",
         parent_id="3c216da5-521c-8109-b6c7-e8ca87f0f3c9",
     )
-    assert captured["body"].index("# 포트폴리오 2026-08-20") < captured["body"].index(
-        "# 김택규 포트폴리오"
+    payload = json.loads(captured["body"])
+    assert payload["properties"] == {"title": "포트폴리오 2026-08-20"}
+    assert payload["markdown"] == "본문"
+    assert "# 포트폴리오 2026-08-20" not in captured["body"]
+
+
+@pytest.mark.asyncio
+async def test_rest_update_writes_markdown_and_title_separately() -> None:
+    paths: list[str] = []
+    bodies: list[dict] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        paths.append(request.url.path)
+        bodies.append(json.loads(request.content))
+        return httpx.Response(200, json={"id": "page-3"})
+
+    session = RestSession(
+        httpx.AsyncClient(
+            base_url="https://api.notion.com/v1",
+            transport=httpx.MockTransport(handler),
+        )
     )
+
+    await session.update_page("page-3", "본문", title="새 제목")
+
+    assert paths == ["/v1/pages/page-3/markdown", "/v1/pages/page-3"]
+    assert bodies[0]["replace_content"]["new_str"] == "본문"
+    assert bodies[1] == {"properties": {"title": "새 제목"}}
+
+
+@pytest.mark.asyncio
+async def test_rest_create_falls_back_to_page_patch_when_properties_are_rejected() -> None:
+    paths: list[str] = []
+    bodies: list[dict] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        paths.append(request.url.path)
+        bodies.append(json.loads(request.content))
+        if len(paths) == 1:
+            return httpx.Response(400, json={"message": "properties unsupported"})
+        return httpx.Response(200, json={"id": "page-4", "url": "https://notion.so/page-4"})
+
+    session = RestSession(
+        httpx.AsyncClient(
+            base_url="https://api.notion.com/v1",
+            transport=httpx.MockTransport(handler),
+        )
+    )
+
+    page_id, _ = await session.create_page(title="제목", markdown="본문", parent_id=None)
+
+    assert page_id == "page-4"
+    assert paths == ["/v1/pages", "/v1/pages", "/v1/pages/page-4"]
+    assert "properties" not in bodies[1]
+    assert bodies[2] == {"properties": {"title": "제목"}}

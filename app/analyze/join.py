@@ -15,6 +15,10 @@ def attach(projects: list[ProjectFacts], til: list[TilFact]) -> list[TilFact]:
 
     unmatched: list[TilFact] = []
     for entry in til:
+        linked = _repo_from_work_repo(projects, entry)
+        if linked is not None:
+            linked.til.append(entry)
+            continue
         confirmed = [
             project
             for project in projects
@@ -61,6 +65,15 @@ def _strongest(projects: list[ProjectFacts], entry: TilFact) -> ProjectFacts | N
     if not ranked:
         return None
     return max(ranked, key=lambda item: item[:-1])[-1]
+
+
+def _repo_from_work_repo(projects: list[ProjectFacts], entry: TilFact) -> ProjectFacts | None:
+    value = (entry.work_repo or "").casefold()
+    if not value:
+        return None
+    matches = [project for project in projects if project.repo.casefold() in value]
+    return matches[0] if len(matches) == 1 else None
+
 
 
 def _tokens(value: str) -> set[str]:

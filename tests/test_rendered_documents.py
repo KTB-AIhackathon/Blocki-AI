@@ -1,0 +1,184 @@
+from __future__ import annotations
+
+from datetime import date, datetime, timezone
+
+import pytest
+
+from app.contracts import (
+    DocumentSpec,
+    Evidence,
+    GitHubSnapshot,
+    JobRequest,
+    ProfileFields,
+    ProjectFacts,
+    ReadmeBlob,
+    RepoActivity,
+    SkillFact,
+    TilFact,
+    ViewerIdentity,
+)
+from app.pipelines.portfolio.build import build as build_portfolio
+from app.pipelines.resume.build import build as build_resume
+
+
+NOW = datetime(2026, 8, 20, tzinfo=timezone.utc)
+FILL_IN = "아직 비어 있습니다. 이 Notion 페이지에서 직접 채워주세요."
+
+
+def _til(page: str, repo: str, *, worked: bool = True) -> TilFact:
+    return TilFact(
+        id=f"til:{page}",
+        date=date(2026, 8, 1),
+        title=f"{page} 기록",
+        body_markdown=f"Repository: {repo}",
+        page_id=page,
+        goal="반복 작업을 줄인다." if worked else "공부한다.",
+        problem="반복 작업이 많다." if worked else "",
+        attempt="도구를 만들었다." if worked else "",
+        result="반복 작업이 줄었다." if worked else "",
+        learned="작은 자동화의 경계를 배웠다." if worked else "",
+        retro="다음에는 측정을 먼저 한다." if worked else "",
+        work_repo=f"https://github.com/{repo}",
+    )
+
+
+def _project(repo: str, til: list[TilFact] | None = None) -> ProjectFacts:
+    return ProjectFacts(
+        id=f"repo:{repo}",
+        repo=repo,
+        url=f"https://github.com/{repo}",
+        description="노션 루틴을 기록하는 디스코드 봇",
+        started_at=datetime(2026, 7, 1, tzinfo=timezone.utc),
+        ended_at=datetime(2026, 8, 20, tzinfo=timezone.utc),
+        my_commits=61,
+        total_commits=61,
+        til=til or [],
+        languages=[
+            SkillFact(
+                id=f"skill:python:{repo}",
+                name="Python",
+                category="language",
+                repos=[repo],
+            )
+        ],
+        score=36.9,
+    )
+
+
+def _evidence(projects: list[ProjectFacts]) -> Evidence:
+    return Evidence(
+        viewer=ViewerIdentity(login="alice", aliases=["alice"]),
+        projects=projects,
+        selection_candidates=projects,
+        skills=[skill for project in projects for skill in project.languages],
+        til=[item for project in projects for item in project.til],
+        my_commits=sum(project.my_commits for project in projects),
+        selection_reason="기록과 결과가 함께 있는 프로젝트를 우선했습니다.",
+    )
+
+
+def _job(kind: str) -> JobRequest:
+    return JobRequest(
+        job_id="job-render",
+        user_id="user",
+        job_type=kind,
+        document=DocumentSpec(
+            kind=kind,
+            profile_fields=ProfileFields(name="홍길동", contact_md="- me@example.com"),
+        ),
+    )
+
+
+@pytest.mark.asyncio
+async def test_portfolio_render_has_three_structured_cards_and_selection_reason() -> None:
+    projects = [
+        _project("acme/princess-secretary", [_til("page-1", "acme/princess-secretary")]),
+        _project("acme/study-log"),
+        _project("acme/third"),
+    ]
+    dropped = _project("acme/learning-log")
+    proposal = await build_portfolio(
+        _job("portfolio"),
+        GitHubSnapshot(collected_at=NOW, complete=True, snapshot_digest="g" * 64),
+        _evidence(projects).model_copy(update={"selection_candidates": [*projects, dropped]}),
+    )
+
+    body = proposal.body_markdown
+    cards = body.split("## 프로젝트", 1)[1].split("## 🔍", 1)[0]
+    assert len([line for line in cards.splitlines() if line.startswith("### ")]) == 3
+    card_blocks = _card_blocks(cards)
+    assert all(label in block for block in card_blocks for label in ("**개요**", "**목표**", "**성과**", "**성장**"))
+    assert cards.count("#### ") <= 4
+    assert "- 역할: 커밋 61개 (전체 61개 중 100%)" in cards
+    assert f"{FILL_IN}" in cards
+    assert "## 🔍 이 프로젝트를 고른 이유" in body
+    assert "> 기록과 결과가 함께 있는 프로젝트를 우선했습니다." in body
+    assert "~~learning-log~~" in body
+    assert "학습 저장소 감점으로 제외" in body
+    assert "---" in body
+    assert not any(line.startswith("# ") for line in body.splitlines())
+
+
+@pytest.mark.asyncio
+async def test_resume_render_has_four_cards_and_intro_without_repository_name() -> None:
+    projects = [_project(f"acme/project-{index}") for index in range(4)]
+    proposal = await build_resume(
+        _job("resume"),
+        GitHubSnapshot(collected_at=NOW, complete=True, snapshot_digest="g" * 64),
+        _evidence(projects),
+    )
+
+    body = proposal.body_markdown
+    cards = body.split("## 주요 작업", 1)[1].split("## 📝", 1)[0]
+    card_blocks = _card_blocks(cards)
+    assert len(card_blocks) <= 4
+    assert all(label in block for block in card_blocks for label in ("**문제**", "**목표**", "**기여**", "**성과**"))
+    intro = body.split("## 소개", 1)[1].split("## 경력", 1)[0]
+    assert "acme/project" not in intro
+    assert intro.count("**") >= 8
+    assert "## 🔍 이 프로젝트를 고른 이유" in body
+    assert "---" in body
+    assert not any(line.startswith("# ") for line in body.splitlines())
+
+
+@pytest.mark.asyncio
+async def test_resume_uses_profile_readme_sections_as_confirmable_drafts() -> None:
+    project = _project("acme/project")
+    snapshot = GitHubSnapshot(
+        collected_at=NOW,
+        complete=True,
+        snapshot_digest="g" * 64,
+        viewer_login="alice",
+        repos=[
+            RepoActivity(
+                owner="acme",
+                name="alice",
+                readme=ReadmeBlob(
+                    path="README.md",
+                    blob_sha="r",
+                    content="## 경력\n\n- 백엔드 개발\n\n## 학력\n\n- 컴퓨터공학\n\n## 기술\n\n- Python",
+                ),
+            )
+        ],
+    )
+    proposal = await build_resume(_job("resume"), snapshot, _evidence([project]))
+
+    assert "(자동 초안 — 확인해 주세요)" in proposal.body_markdown
+    assert "- 백엔드 개발" in proposal.body_markdown
+    assert "- 컴퓨터공학" in proposal.body_markdown
+    assert "- Python" in proposal.body_markdown
+
+
+def _card_blocks(section: str) -> list[str]:
+    blocks: list[str] = []
+    current: list[str] = []
+    for line in section.splitlines():
+        if line.startswith("### ") and not line.startswith("#### "):
+            if current:
+                blocks.append("\n".join(current))
+            current = [line]
+        elif current:
+            current.append(line)
+    if current:
+        blocks.append("\n".join(current))
+    return blocks

@@ -142,7 +142,16 @@ async def build_portfolio(
 def project_headings(body: str) -> list[str]:
     start = body.find("## 프로젝트")
     section = body[start:] if start >= 0 else ""
-    return [line for line in section.splitlines() if line.startswith("### ")]
+    headings = []
+    for line in section.splitlines():
+        if not line.startswith("### "):
+            continue
+        value = line[4:]
+        first, _, rest = value.partition(" ")
+        if first.endswith(".") and first[:-1].isdigit():
+            value = rest
+        headings.append("### " + value.split(" —", 1)[0])
+    return headings
 
 
 def grounded_llm() -> FakeLLM:
@@ -214,8 +223,8 @@ async def test_grounded_project_lines_keep_description_and_highlights() -> None:
     body = proposal.body_markdown
     assert "결제와 알림을 다루는 백엔드를 만들었습니다." in body
     assert "결제 API를 구현했습니다." not in body
-    assert "> alpha 서비스" in body
-    assert "- one" in body and "- two" in body and "- three" in body
+    assert "— alpha 서비스" in body
+    assert "- one" not in body and "- two" not in body and "- three" not in body
     assert "- four" not in body
     assert "aaaaaaa" not in body
     assert "eeeeeee" not in body
@@ -226,7 +235,7 @@ async def test_grounded_project_lines_keep_description_and_highlights() -> None:
         if ref.field == "projects_md" and ref.source_type == "commit"
     }
     assert f"commit:{repo}:{'a' * 12}" in commit_ids
-    assert f"commit:{repo}:{'g' * 12}" not in commit_ids
+    assert f"commit:{repo}:{'g' * 12}" in commit_ids
 
 
 async def test_hallucinated_project_ids_fall_back_to_facts() -> None:
@@ -250,7 +259,7 @@ async def test_hallucinated_project_ids_fall_back_to_facts() -> None:
     assert "쿠버네티스" not in proposal.body_markdown
     assert "결제 API 기여를 했습니다." not in proposal.body_markdown
     assert "aaaaaaa" not in proposal.body_markdown
-    assert "feat: 알림 발송" in proposal.body_markdown
+    assert "feat: 알림 발송" not in proposal.body_markdown
     assert "bbbbbbb" not in proposal.body_markdown
 
 
@@ -291,12 +300,12 @@ async def test_skills_list_featured_repos_not_percents() -> None:
     assert "- **Frameworks**: FastAPI" in body
     assert "Redis" not in body
     assert "**Database**" not in body
-    assert "— alpha" not in body
+    assert "### 1. alpha — alpha 서비스" in body
     assert "hackathon" not in body
     cards = body[body.find("## 프로젝트") :]
     alpha = cards.split("### ")[1]
-    assert "기술: Python, FastAPI" in alpha
-    assert "기술: Python, FastAPI" not in cards.split("### beta", 1)[-1]
+    assert "기술 스택: Python, FastAPI" in alpha
+    assert "기술 스택: Python, FastAPI" not in cards.split("### 2. beta", 1)[-1]
     skill_repos = {
         ref.repo
         for ref in proposal.evidence_refs
@@ -386,6 +395,7 @@ async def test_curator_order_replaces_score_order() -> None:
     assert "### gamma" not in proposal.body_markdown
     assert "cards" not in proposal.model_dump()
     assert "selected_ids" not in proposal.model_dump()
+    assert "> test" in proposal.body_markdown
 
 
 async def test_curator_may_keep_two_projects() -> None:
@@ -428,7 +438,7 @@ async def test_q1_pitch_and_q2_ids_use_original_titles() -> None:
     body = proposal.body_markdown
     assert "결제 서비스를 만들었습니다." in body
     assert "결제 검증을 붙였습니다." not in body
-    assert "- one" in body.split("### beta")[0]
+    assert "- one" not in body
 
 
 async def test_repo_only_work_ids_fall_back_to_highlights() -> None:
@@ -439,7 +449,7 @@ async def test_repo_only_work_ids_fall_back_to_highlights() -> None:
     )
     proposal = await build_portfolio(llm)
     assert "쿠버네티스" not in proposal.body_markdown
-    assert "feat: 결제 API 구현" in proposal.body_markdown
+    assert "feat: 결제 API 구현" not in proposal.body_markdown
 
 
 async def test_one_fill_error_falls_back_that_card() -> None:
@@ -467,8 +477,8 @@ async def test_one_fill_error_falls_back_that_card() -> None:
     )
     proposal = await build_portfolio(llm)
     assert proposal.status == "proposed"
-    assert "> alpha 서비스" in proposal.body_markdown
-    assert "feat: 결제 API 구현" in proposal.body_markdown
+    assert "— alpha 서비스" in proposal.body_markdown
+    assert "feat: 결제 API 구현" not in proposal.body_markdown
 
 
 async def test_unselected_repos_are_not_filled() -> None:
@@ -693,9 +703,12 @@ async def test_llm_off_work_mixes_commit_pr_and_til() -> None:
         }
     )
     proposal = await build_portfolio(llm=None, projects=[alpha, *_project_tail()[:2]])
-    work = proposal.body_markdown.split("**주요 작업**", 1)[1].split("**배운 것**", 1)[0]
-    assert "feat: 결제 API 구현" in work
-    assert "feat: 결제 검증" in work
+    # 성과는 TIL 의 시도·결과에서만 나온다. 커밋 제목을 성과로 올리면 사용자가 쓰지
+    # 않은 문장이 성과가 되고, 커밋이 많은 저장소일수록 카드가 부풀어 오른다.
+    work = proposal.body_markdown.split("**성과**", 1)[1].split("**성장**", 1)[0]
     assert "캐시 개선" in work
+    assert "feat: 결제 API 구현" not in work
     assert "두 번째 커밋" not in work
     assert "세 번째 커밋" not in work
+    # 커밋과 PR 은 개요의 기여 수치로 남는다.
+    assert "- 역할: 커밋 20개" in proposal.body_markdown

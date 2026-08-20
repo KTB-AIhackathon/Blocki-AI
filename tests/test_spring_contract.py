@@ -83,7 +83,12 @@ def test_spring_accepts_a_generated_document(client, stub_github, kind) -> None:
     body = client.post("/internal/jobs", json=spring_request(kind), headers=HEADERS).json()
 
     assert validate(body) in SUCCESS_STATUSES
-    assert body["artifact"]["body_markdown"].startswith("# 홍길동")
+    # 이름은 Notion 페이지 제목이 된다. 본문은 첫 섹션부터 시작한다.
+    assert body["artifact"]["title"].startswith("홍길동")
+    assert body["artifact"]["body_markdown"].lstrip().startswith("##")
+    assert not any(
+        line.startswith("# ") for line in body["artifact"]["body_markdown"].splitlines()
+    )
 
 
 def test_a_document_grounded_in_repositories_reports_no_missing_source(
@@ -122,7 +127,7 @@ def test_a_document_job_that_succeeds_always_carries_an_artifact(client, stub_gi
         body = client.post("/internal/jobs", json=spring_request(kind), headers=HEADERS).json()
         assert body["ok"] is True
         assert body["artifact"] is not None, kind
-        assert body["artifact"]["title"] == ("포트폴리오" if kind == "portfolio" else "이력서")
+        assert body["artifact"]["title"] == ("홍길동 포트폴리오" if kind == "portfolio" else "홍길동 이력서")
 
 
 def test_the_worker_still_answers_its_own_richer_shape(client, stub_github) -> None:

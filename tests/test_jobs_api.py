@@ -97,7 +97,8 @@ def test_successful_job_returns_artifact_for_spring(
     assert body["ok"] is True
     assert body["artifact"]["kind"] == "resume"
     assert body["artifact"]["content_type"] == "text/markdown"
-    assert "홍길동" in body["artifact"]["body_markdown"]
+    assert "홍길동" in body["artifact"]["title"]
+    assert "홍길동" not in body["artifact"]["body_markdown"]
     assert body["next_cursor"][0]["head_sha"]
     assert body["snapshot_summary"]["repo_count"] == 1
     assert PAT not in response.text
@@ -139,7 +140,7 @@ def test_notion_fan_out_uses_the_header_token(
 
     assert seen["token"] == NOTION_TOKEN
     assert seen["parent"] == "parent-1"
-    assert seen["title"] == "이력서"
+    assert seen["title"] == "홍길동 이력서"
     assert body["notion"]["page_url"] == "https://notion.so/page-1"
     assert NOTION_TOKEN not in response.text
 
@@ -302,5 +303,5 @@ async def test_portfolio_job_joins_til_when_notion_is_connected(
     body = result.artifact.body_markdown if result.artifact else ""
     assert result.ok is True
     assert "캐시 개선" in body
-    assert "**배운 것**" in body
+    assert "**성과**" in body and "**성장**" in body
     assert "publish_briefs" not in result.proposal.model_dump()

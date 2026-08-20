@@ -37,14 +37,17 @@ async def build(
         return common.blocked(job, KIND, missing, template_ref)
 
     sheets = briefs.render_briefs(evidence)
-    _selected, dossiers, intro = await team.run_team(
+    _selected, dossiers, intro, selection_reason = await team.run_team(
         evidence, llm, deadline=deadline, sheets=sheets
     )
+    evidence.selection_reason = selection_reason or evidence.selection_reason
     view = team.view_of(evidence, _selected)
+    view = view.model_copy(update={"selection_reason": evidence.selection_reason})
     summary_md, summary_refs = sections.summary(view, intro)
     skills_md, skills_refs = sections.skills(view)
     projects_md, projects_refs = sections.projects(view, dossiers)
     learning_md, learning_refs = sections.learning(view)
+    selection_md, selection_refs = common.selection(view, view.projects)
 
     body = render.render(
         KIND,
@@ -56,6 +59,7 @@ async def build(
             "skills_md": skills_md,
             "projects_md": projects_md,
             "learning_md": learning_md,
+            "selection_md": selection_md,
             "experience_md": fields.experience_md,
             "education_md": fields.education_md,
         },
@@ -67,6 +71,7 @@ async def build(
         *skills_refs,
         *projects_refs,
         *learning_refs,
+        *selection_refs,
     ]
     complete = snapshot.complete and evidence.complete and not unresolved
     proposal = ArtifactProposal(
@@ -74,6 +79,7 @@ async def build(
         job_id=job.job_id,
         status="proposed" if complete else "partial",
         kind=KIND,
+        owner_name=fields.name,
         body_markdown=body,
         template_ref=template_ref,
         evidence_refs=refs,

@@ -54,6 +54,7 @@ INTRO_FORM = "## 소개\n\n"
 class Folder(BaseModel):
     project_id: str
     score: float = 0.0
+    score_breakdown: dict[str, float] = Field(default_factory=dict)
     stack: list[str] = Field(default_factory=list)
     team: bool = False
     density: int = 0
@@ -196,6 +197,7 @@ def make_folders(evidence: Evidence) -> list[Folder]:
         Folder(
             project_id=project.id,
             score=project.score,
+            score_breakdown=project.score_breakdown,
             stack=stack_of(project, evidence),
             team=project.team,
             density=density_of(project),
@@ -232,6 +234,7 @@ def folders_digest(folders: list[Folder]) -> dict[str, Any]:
             {
                 "id": folder.project_id,
                 "score": folder.score,
+                "score_breakdown": folder.score_breakdown,
                 "stack": folder.stack,
                 "team": folder.team,
                 "density": folder.density,
@@ -350,10 +353,10 @@ def fallback_card(folder: Folder, project: ProjectFacts) -> Dossier:
 
 async def select_ids(
     folders: list[Folder], llm: Any | None, *, timeout: float
-) -> list[str]:
+) -> tuple[list[str], str]:
     fallback = score_ids(folders)
     if len(folders) < 2 or timeout < SELECT_FLOOR:
-        return fallback[: len(folders)] if len(folders) < 2 else fallback
+        return (fallback[: len(folders)] if len(folders) < 2 else fallback), ""
     result = await guard.complete(
         _SelectDraft,
         instruction=SELECT_INSTRUCTION,
@@ -362,9 +365,9 @@ async def select_ids(
         llm=llm,
     )
     if result is None:
-        return fallback
+        return fallback, ""
     chosen = sanitize_ids(result.selected_ids, folders)
-    return chosen or fallback
+    return chosen or fallback, result.reason.strip()
 
 
 async def fill_card(
@@ -469,13 +472,13 @@ async def run_team(
     *,
     deadline: float | None = None,
     sheets: list[dict[str, str]] | None = None,
-) -> tuple[list[str], list[Dossier], list[GroundedText]]:
+) -> tuple[list[str], list[Dossier], list[GroundedText], str]:
     folders = make_folders(evidence)
     mapped = sheets_by_id(evidence, sheets)
     select_timeout = cap(
         deadline, SELECT_CAP, reserve=FILL_FLOOR + WRITE_FLOOR + PUBLISH_RESERVE
     )
-    selected_ids = await select_ids(folders, llm, timeout=select_timeout)
+    selected_ids, reason = await select_ids(folders, llm, timeout=select_timeout)
     view = view_of(evidence, selected_ids)
     fill_timeout = cap(deadline, FILL_CAP, reserve=WRITE_FLOOR + PUBLISH_RESERVE)
     dossiers = await fill_cards(
@@ -485,4 +488,4 @@ async def run_team(
     intro = await write_intro(
         view, dossiers, selected_ids, llm, timeout=write_timeout, sheets=mapped
     )
-    return selected_ids, dossiers, intro
+    return selected_ids, dossiers, intro, reason
