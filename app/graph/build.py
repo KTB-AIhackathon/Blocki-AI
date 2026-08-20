@@ -26,6 +26,7 @@ class _State(TypedDict, total=False):
     proposal: ArtifactProposal
     artifact: ArtifactPayload | None
     briefs: list[dict[str, str]]
+    hub_tail: str
     notion: NotionWriteResult | None
 
 

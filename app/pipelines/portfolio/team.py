@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import re
 import time
 from typing import Any
 
@@ -11,6 +12,7 @@ from pydantic import BaseModel, Field
 from app.contracts import Evidence, ProjectFacts
 from app.llm import guard
 from app.llm.guard import GroundedText
+from app.pipelines.portfolio import briefs
 
 MAX_FEATURED = 3
 SELECT_CAP = 30.0
@@ -30,21 +32,21 @@ SELECT_INSTRUCTION = (
     "동점이면 기술이나 팀/개인을 섞는다. 점수는 마지막이다."
 )
 PITCH_INSTRUCTION = (
-    "FORM은 빈 카드 모양이다. MATERIALS만 보고 이 카드의 한두 줄을 pitch에 쓴다. "
-    "만든 사실만 쓴다. 수치나 성격을 만들지 않는다. "
+    "FORM은 빈 카드 모양이다. MATERIALS의 sheet만 보고 이 카드의 한두 줄을 pitch에 쓴다. "
+    "시트에 있는 사실만 쓴다. 수치나 성격을 만들지 않는다. "
     "각 문장에 실존 evidence_ids를 단다."
 )
 WORK_INSTRUCTION = (
-    "FORM은 빈 카드의 주요 작업 칸이다. MATERIALS의 작업 제목만 보고 "
+    "FORM은 빈 카드의 주요 작업 칸이다. MATERIALS의 sheet와 work_ids만 보고 "
     "화면에 넣을 id를 work_ids에 최대 3개 고른다. "
     "문장을 만들지 않는다. commit·pr·issue·til id만 넣는다."
 )
 WRITE_INSTRUCTION = (
-    "FORM은 소개 칸이다. 고른 카드의 한 줄과 작업 제목만 보고 intro를 한국어로 쓴다. "
-    "만든 사실만 쓴다. 성격이나 미션 문장은 쓰지 않는다. "
+    "FORM은 소개 칸이다. 고른 카드의 sheet, 한 줄, 작업 제목만 보고 intro를 한국어로 쓴다. "
+    "시트에 있는 사실만 쓴다. 성격이나 미션 문장은 쓰지 않는다. "
     "고르지 않은 저장소를 인용하지 않는다. "
     "수치를 만들지 않는다. 각 문장에 evidence_ids를 넣는다. "
-    "작업 불릿을 다시 쓰지 않는다."
+    "시트를 다시 쓰지 않는다. 작업 불릿을 다시 쓰지 않는다."
 )
 INTRO_FORM = "## 소개\n\n"
 
@@ -128,8 +130,51 @@ def work_catalog(project: ProjectFacts) -> list[dict[str, str]]:
     return items
 
 
+def _norm_title(title: str) -> str:
+    text = re.sub(r"\s+", " ", title).casefold().strip()
+    for prefix in ("feat:", "fix:"):
+        if text.startswith(prefix):
+            text = text[len(prefix) :].strip()
+            break
+    return text
+
+
 def default_work_ids(project: ProjectFacts) -> list[str]:
-    return [item["id"] for item in work_catalog(project)[:3]]
+    catalog = work_catalog(project)
+    by_id = {item["id"]: item["title"] for item in catalog}
+    buckets = [
+        [item.id for item in project.highlights if (item.subject or "").strip()],
+        [
+            item.id
+            for item in (*project.pull_requests, *project.issues)
+            if (item.title or "").strip()
+        ],
+        [item.id for item in project.til if (item.title or "").strip()],
+    ]
+    chosen: list[str] = []
+    seen: set[str] = set()
+
+    def take(source_id: str) -> bool:
+        title = by_id.get(source_id, "")
+        key = _norm_title(title)
+        if not title or key in seen:
+            return False
+        seen.add(key)
+        chosen.append(source_id)
+        return True
+
+    for bucket in buckets:
+        for source_id in bucket:
+            if take(source_id):
+                break
+        if len(chosen) >= 3:
+            return chosen
+    for item in catalog:
+        if item["id"] in chosen:
+            continue
+        if take(item["id"]) and len(chosen) >= 3:
+            return chosen
+    return chosen
 
 
 def card_form(project: ProjectFacts, featured: list[str]) -> str:
@@ -162,22 +207,22 @@ def make_folders(evidence: Evidence) -> list[Folder]:
     ]
 
 
-def project_digest(project: ProjectFacts, evidence: Evidence) -> dict[str, Any]:
+def sheets_by_id(
+    evidence: Evidence, sheets: list[dict[str, str]] | None
+) -> dict[str, str]:
+    items = sheets if sheets is not None else briefs.render_briefs(evidence)
+    return {
+        project.id: item["markdown"]
+        for project, item in zip(evidence.projects, items)
+    }
+
+
+def project_digest(project: ProjectFacts, sheet: str) -> dict[str, Any]:
     return {
         "id": project.id,
         "repo": project.repo,
-        "description": project.description,
-        "stack": stack_of(project, evidence),
-        "highlights": [
-            {"id": item.id, "subject": item.subject, "change_type": item.change_type}
-            for item in project.highlights
-        ],
-        "pull_requests": [{"id": item.id, "title": item.title} for item in project.pull_requests],
-        "issues": [{"id": item.id, "title": item.title} for item in project.issues],
-        "til": [
-            {"id": item.id, "title": item.title, "date": item.date.isoformat()}
-            for item in project.til
-        ],
+        "sheet": sheet,
+        "work_ids": work_catalog(project),
     }
 
 
@@ -199,30 +244,24 @@ def folders_digest(folders: list[Folder]) -> dict[str, Any]:
 
 
 def write_digest(
-    evidence: Evidence, dossiers: list[Dossier], selected_ids: list[str]
+    evidence: Evidence,
+    dossiers: list[Dossier],
+    selected_ids: list[str],
+    sheets: dict[str, str],
 ) -> dict[str, Any]:
     chosen = {dossier.project_id: dossier for dossier in dossiers}
-    featured = {project.repo for project in evidence.projects}
     catalog = {project.id: work_catalog(project) for project in evidence.projects}
     return {
-        "viewer": evidence.viewer.login,
-        "selected_ids": selected_ids,
-        "skills": [
-            {"id": skill.id, "name": skill.name, "category": skill.category}
-            for skill in evidence.skills
-            if any(repo in featured for repo in skill.repos)
-        ],
-        "projects": [
+        "selected": [
             {
                 "id": project.id,
                 "repo": project.repo,
-                "description": project.description,
-                "languages": [skill.name for skill in project.languages],
+                "sheet": sheets.get(project.id, ""),
                 "pitch": [
                     item.model_dump()
                     for item in chosen.get(project.id, Dossier(project_id=project.id)).pitch
                 ],
-                "work": [
+                "chosen_work": [
                     item
                     for item in catalog.get(project.id, [])
                     if item["id"]
@@ -230,7 +269,8 @@ def write_digest(
                 ],
             }
             for project in evidence.projects
-        ],
+            if project.id in selected_ids
+        ]
     }
 
 
@@ -280,11 +320,18 @@ def view_of(evidence: Evidence, selected_ids: list[str]) -> Evidence:
 
 
 def sanitize_work_ids(picked: list[str], project: ProjectFacts) -> list[str]:
-    allowed = {item["id"] for item in work_catalog(project)}
+    allowed = {item["id"]: item["title"] for item in work_catalog(project)}
     chosen: list[str] = []
+    seen: set[str] = set()
     for item in picked:
-        if item in allowed and item.startswith(WORK_PREFIXES) and item not in chosen:
-            chosen.append(item)
+        title = allowed.get(item)
+        if title is None or not item.startswith(WORK_PREFIXES) or item in chosen:
+            continue
+        key = _norm_title(title)
+        if key in seen:
+            continue
+        seen.add(key)
+        chosen.append(item)
         if len(chosen) >= 3:
             return chosen
     return chosen or default_work_ids(project)
@@ -327,11 +374,12 @@ async def fill_card(
     llm: Any | None,
     *,
     timeout: float,
+    sheet: str,
 ) -> Dossier:
     card = fallback_card(folder, project)
     if timeout < FILL_FLOOR:
         return card
-    digest = project_digest(project, evidence)
+    digest = project_digest(project, sheet)
     pitch_task = guard.complete(
         _PitchDraft,
         instruction=PITCH_INSTRUCTION,
@@ -363,6 +411,7 @@ async def fill_cards(
     llm: Any | None,
     *,
     timeout: float,
+    sheets: dict[str, str],
 ) -> list[Dossier]:
     by_id = {project.id: project for project in evidence.projects}
     by_folder = {folder.project_id: folder for folder in folders}
@@ -372,7 +421,12 @@ async def fill_cards(
         project = by_id[project_id]
         folder = by_folder[project_id]
         memory[project_id] = await fill_card(
-            project, folder, evidence, llm, timeout=timeout
+            project,
+            folder,
+            evidence,
+            llm,
+            timeout=timeout,
+            sheet=sheets.get(project_id, ""),
         )
 
     outcomes = await asyncio.gather(
@@ -392,13 +446,14 @@ async def write_intro(
     llm: Any | None,
     *,
     timeout: float,
+    sheets: dict[str, str],
 ) -> list[GroundedText]:
     if evidence.is_empty() or timeout < WRITE_FLOOR:
         return []
     result = await guard.complete(
         _WriteDraft,
         instruction=WRITE_INSTRUCTION,
-        digest=write_digest(evidence, dossiers, selected_ids),
+        digest=write_digest(evidence, dossiers, selected_ids, sheets),
         extra={"form": INTRO_FORM},
         timeout=timeout,
         llm=llm,
@@ -409,16 +464,25 @@ async def write_intro(
 
 
 async def run_team(
-    evidence: Evidence, llm: Any | None, *, deadline: float | None = None
+    evidence: Evidence,
+    llm: Any | None,
+    *,
+    deadline: float | None = None,
+    sheets: list[dict[str, str]] | None = None,
 ) -> tuple[list[str], list[Dossier], list[GroundedText]]:
     folders = make_folders(evidence)
+    mapped = sheets_by_id(evidence, sheets)
     select_timeout = cap(
         deadline, SELECT_CAP, reserve=FILL_FLOOR + WRITE_FLOOR + PUBLISH_RESERVE
     )
     selected_ids = await select_ids(folders, llm, timeout=select_timeout)
     view = view_of(evidence, selected_ids)
     fill_timeout = cap(deadline, FILL_CAP, reserve=WRITE_FLOOR + PUBLISH_RESERVE)
-    dossiers = await fill_cards(view, folders, selected_ids, llm, timeout=fill_timeout)
+    dossiers = await fill_cards(
+        view, folders, selected_ids, llm, timeout=fill_timeout, sheets=mapped
+    )
     write_timeout = cap(deadline, WRITE_CAP, reserve=PUBLISH_RESERVE)
-    intro = await write_intro(view, dossiers, selected_ids, llm, timeout=write_timeout)
+    intro = await write_intro(
+        view, dossiers, selected_ids, llm, timeout=write_timeout, sheets=mapped
+    )
     return selected_ids, dossiers, intro

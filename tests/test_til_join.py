@@ -68,6 +68,36 @@ def test_strong_match_uses_korean_description() -> None:
     assert facts[0].til == [entry]
 
 
+def test_single_metadata_token_does_not_join() -> None:
+    facts = [project("acme/demo-api", description="다른 설명")]
+    entry = til("api 기록")
+
+    assert join.attach(facts, [entry]) == [entry]
+    assert facts[0].til == []
+
+
+def test_period_only_does_not_join_even_when_unique() -> None:
+    facts = [
+        project(
+            "acme/one",
+            started_at=datetime(2026, 8, 1, tzinfo=timezone.utc),
+            ended_at=datetime(2026, 8, 10, tzinfo=timezone.utc),
+        )
+    ]
+    entry = til("날짜만 맞는 기록", day=date(2026, 8, 7))
+
+    assert join.attach(facts, [entry]) == [entry]
+    assert facts[0].til == []
+
+
+def test_short_repo_name_in_title_joins() -> None:
+    facts = [project("acme/princess-secretary")]
+    entry = til("princess-secretary 운영 기록")
+
+    assert join.attach(facts, [entry]) == []
+    assert facts[0].til == [entry]
+
+
 def test_weak_match_is_discarded_when_dates_are_ambiguous() -> None:
     facts = [
         project(

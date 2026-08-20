@@ -29,11 +29,6 @@ def attach(projects: list[ProjectFacts], til: list[TilFact]) -> list[TilFact]:
         strong = _strongest(projects, entry)
         if strong is not None:
             strong.til.append(entry)
-            continue
-
-        weak = [project for project in projects if _in_period(project, entry)]
-        if len(weak) == 1:
-            weak[0].til.append(entry)
         else:
             unmatched.append(entry)
     return unmatched
@@ -41,8 +36,8 @@ def attach(projects: list[ProjectFacts], til: list[TilFact]) -> list[TilFact]:
 
 def _strongest(projects: list[ProjectFacts], entry: TilFact) -> ProjectFacts | None:
     query = _tokens(" ".join((entry.title, *entry.tags)))
-    if not query:
-        return None
+    title = entry.title.casefold()
+    body = entry.body_markdown.casefold()
 
     ranked: list[tuple[int, int, int, int, ProjectFacts]] = []
     for index, project in enumerate(projects):
@@ -50,26 +45,22 @@ def _strongest(projects: list[ProjectFacts], entry: TilFact) -> ProjectFacts | N
         metadata = _tokens(" ".join((project.repo, *project.topics)))
         description_overlap = len(query & description)
         metadata_overlap = len(query & metadata)
-        total_overlap = len(query & (description | metadata))
-        if total_overlap:
-            ranked.append(
-                (
-                    description_overlap * 3 + metadata_overlap,
-                    description_overlap,
-                    total_overlap,
-                    -index,
-                    project,
-                )
+        short = project.repo.rsplit("/", 1)[-1].casefold()
+        named = len(short) >= 3 and (short in title or short in body)
+        if description_overlap < 1 and metadata_overlap < 2 and not named:
+            continue
+        ranked.append(
+            (
+                description_overlap * 3 + metadata_overlap + (3 if named else 0),
+                description_overlap,
+                metadata_overlap,
+                -index,
+                project,
             )
+        )
     if not ranked:
         return None
     return max(ranked, key=lambda item: item[:-1])[-1]
-
-
-def _in_period(project: ProjectFacts, entry: TilFact) -> bool:
-    if project.started_at is None or project.ended_at is None:
-        return False
-    return project.started_at.date() <= entry.date <= project.ended_at.date()
 
 
 def _tokens(value: str) -> set[str]:

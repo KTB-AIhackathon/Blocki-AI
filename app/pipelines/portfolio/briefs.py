@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from app.contracts import Evidence, ProjectFacts
+from app.contracts import Evidence, ProjectFacts, TilFact
 from app.pipelines import common
 
 DATE_MARKER = "날짜:"
@@ -54,11 +54,13 @@ def brief_of(project: ProjectFacts, evidence: Evidence) -> str:
         parts.extend(["", "## 이슈", ""])
         parts.extend(f"- {title}" for title in issues)
 
-    learned = [
-        f"- {item.date:%Y-%m-%d} · {item.title.strip()}"
-        for item in project.til
-        if (item.title or "").strip()
-    ]
+    learned: list[str] = []
+    for item in project.til:
+        title = (item.title or "").strip()
+        if not title:
+            continue
+        learned.append(f"- {item.date:%Y-%m-%d} · {title}")
+        learned.extend(f"  - {line}" for line in til_excerpt(item.body_markdown))
     if learned:
         parts.extend(["", "## 배운 것", ""])
         parts.extend(learned)
@@ -67,6 +69,35 @@ def brief_of(project: ProjectFacts, evidence: Evidence) -> str:
     if DATE_MARKER in text:
         text = text.replace(DATE_MARKER, "기간:")
     return text
+
+
+def til_excerpt(body: str, *, limit: int = 2, max_chars: int = 80) -> list[str]:
+    lines: list[str] = []
+    for raw in body.splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#") or DATE_MARKER in line:
+            continue
+        if line.startswith(">"):
+            line = line[1:].strip()
+        if line.startswith("- "):
+            line = line[2:].strip()
+        if len(line) < 8:
+            continue
+        lines.append(line[:max_chars])
+        if len(lines) >= limit:
+            break
+    return lines
+
+
+def hub_tail(unmatched: list[TilFact]) -> str:
+    rows = [
+        f"- {item.date:%Y-%m-%d} · {item.title.strip()}"
+        for item in unmatched
+        if (item.title or "").strip()
+    ]
+    if not rows:
+        return ""
+    return "## 그 외 학습\n" + "\n".join(rows) + "\n"
 
 
 def _label(repo: str, featured: list[str]) -> str:

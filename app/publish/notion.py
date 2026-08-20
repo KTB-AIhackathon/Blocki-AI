@@ -65,6 +65,7 @@ async def publish_artifact(
     session: NotionSession | None = None,
     briefs: list[dict[str, str]] | None = None,
     publish_warnings: list[str] | None = None,
+    hub_tail: str | None = None,
 ) -> NotionWriteResult:
     if artifact is None:
         return NotionWriteResult(skipped_reason="no_artifact")
@@ -76,6 +77,7 @@ async def publish_artifact(
             target=target,
             session=session,
             publish_warnings=publish_warnings,
+            hub_tail=hub_tail or "",
         )
     return await publish_markdown(
         title=log_title(artifact, target),
@@ -94,6 +96,7 @@ async def _publish_portfolio(
     target: NotionTarget | None,
     session: NotionSession | None,
     publish_warnings: list[str] | None,
+    hub_tail: str = "",
 ) -> NotionWriteResult:
     token = (notion_token or "").strip()
     if not token:
@@ -147,7 +150,7 @@ async def _publish_portfolio(
             continue
         mentions.append(f'<page url="{child_url or f"https://notion.so/{child_id}"}">{brief["title"]}</page>')
     try:
-        await live.update_page(hub_id, _hub_index(mentions))
+        await live.update_page(hub_id, _hub_index(mentions, hub_tail))
     except Exception:
         notes.append("프로젝트 허브 인덱스를 갱신하지 못했습니다")
     return NotionWriteResult(attempted=True, ok=True, page_id=page_id, page_url=page_url)
@@ -165,10 +168,15 @@ async def _upsert_brief(
     return page_id, page_url
 
 
-def _hub_index(mentions: list[str]) -> str:
-    if not mentions:
-        return "# 프로젝트\n"
-    return "# 프로젝트\n\n" + "\n".join(mentions) + "\n"
+def _hub_index(mentions: list[str], tail: str = "") -> str:
+    parts = ["# 프로젝트"]
+    if mentions:
+        parts.append("")
+        parts.extend(mentions)
+    extra = (tail or "").strip()
+    if extra:
+        parts.extend(["", extra])
+    return "\n".join(parts) + "\n"
 
 
 async def publish_markdown(

@@ -58,6 +58,9 @@ def build_node(req: JobRequest, deadline: float | None = None):
         briefs = list(getattr(proposal, "_publish_briefs", []) or [])
         if briefs:
             out["briefs"] = briefs
+        tail = getattr(proposal, "_hub_tail", "") or ""
+        if tail:
+            out["hub_tail"] = tail
         return out
 
     return build
@@ -75,6 +78,8 @@ def publish_node(req: JobRequest, notion_token: str, publish_fn=publish_artifact
         if state.get("briefs"):
             kwargs["briefs"] = state["briefs"]
             kwargs["publish_warnings"] = extra
+        if state.get("hub_tail"):
+            kwargs["hub_tail"] = state["hub_tail"]
         result = await publish_fn(
             state.get("artifact"),
             notion_token=notion_token,

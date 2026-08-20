@@ -5,6 +5,8 @@ from __future__ import annotations
 import time
 from datetime import datetime, timezone
 
+from datetime import date
+
 from app.contracts import (
     CommitFact,
     DocumentSpec,
@@ -14,10 +16,13 @@ from app.contracts import (
     ProfileFields,
     ProjectFacts,
     SkillFact,
+    TilFact,
     ViewerIdentity,
+    WorkItem,
 )
 from app.pipelines.portfolio import briefs
 from app.pipelines.portfolio import build as portfolio_build
+from app.pipelines.portfolio import team
 from tests.test_llm_guard import FakeLLM
 
 NOW = datetime(2026, 6, 1, tzinfo=timezone.utc)
@@ -482,6 +487,24 @@ async def test_unselected_repos_are_not_filled() -> None:
     assert all("delta 서비스" not in prompt for prompt in fill_prompts)
 
 
+async def test_fill_and_intro_use_sheet_not_split_json() -> None:
+    llm = _slot_llm(selected=["repo:acme/alpha", "repo:acme/beta"])
+    await build_portfolio(llm)
+    fill_prompts = [
+        prompt
+        for prompt, name in zip(llm.prompts, llm.schemas)
+        if name in {"_PitchDraft", "_WorkDraft"}
+    ]
+    assert fill_prompts
+    assert all('"sheet"' in prompt for prompt in fill_prompts)
+    assert all('"highlights"' not in prompt for prompt in fill_prompts)
+    assert all("delta 서비스" not in prompt for prompt in fill_prompts)
+    intro = next(prompt for prompt, name in zip(llm.prompts, llm.schemas) if name == "_WriteDraft")
+    assert '"sheet"' in intro
+    assert "delta 서비스" not in intro
+    assert '"highlights"' not in intro
+
+
 async def test_intro_sees_filled_pitch_not_unselected_repo() -> None:
     llm = _slot_llm(
         selected=["repo:acme/alpha", "repo:acme/beta"],
@@ -538,3 +561,141 @@ def test_brief_renderer_keeps_original_work_titles() -> None:
     alpha = next(item for item in sheets if item["title"] == "alpha")
     assert "feat: 결제 API 구현" in alpha["markdown"]
     assert "날짜:" not in alpha["markdown"]
+
+
+def test_brief_learned_includes_two_body_lines_without_date_marker() -> None:
+    learned = TilFact(
+        id="til:cache",
+        date=date(2026, 8, 20),
+        title="캐시 개선",
+        body_markdown=(
+            "# 메모\n\n날짜: 2026-08-20\n\n응답 시간이 줄었다.\n배포 후 확인했다.\n세 번째는 버린다.\n"
+        ),
+        page_id="p1",
+    )
+    project = four_projects()[0].model_copy(update={"til": [learned]})
+    sheet = briefs.brief_of(project, evidence_of([project]))
+    assert "캐시 개선" in sheet
+    assert "응답 시간이 줄었다." in sheet
+    assert "배포 후 확인했다." in sheet
+    assert "세 번째는 버린다." not in sheet
+    assert "날짜:" not in sheet
+
+
+async def test_portfolio_card_keeps_til_title_not_body() -> None:
+    learned = TilFact(
+        id="til:cache",
+        date=date(2026, 8, 20),
+        title="캐시 개선",
+        body_markdown="응답 시간이 줄었다.",
+        page_id="p1",
+    )
+    project = four_projects()[0].model_copy(update={"til": [learned]})
+    proposal = await build_portfolio(llm=None, projects=[project, *_project_tail()[:2]])
+    assert "캐시 개선" in proposal.body_markdown
+    assert "응답 시간이 줄었다." not in proposal.body_markdown
+
+
+async def test_unmatched_til_is_hub_tail_not_portfolio() -> None:
+    extra = TilFact(
+        id="til:solo",
+        date=date(2026, 8, 1),
+        title="혼자 있는 기록",
+        body_markdown="",
+        page_id="x",
+    )
+    proposal = await build_portfolio(
+        llm=None,
+        evidence=evidence_of(four_projects()).model_copy(update={"unmatched_til": [extra]}),
+    )
+    assert "혼자 있는 기록" not in proposal.body_markdown
+    assert "그 외 학습 기록" not in proposal.body_markdown
+    assert "혼자 있는 기록" in proposal._hub_tail
+    assert "## 그 외 학습" in proposal._hub_tail
+    assert "날짜:" not in proposal._hub_tail
+    dumped = proposal.model_dump()
+    assert "_hub_tail" not in dumped
+    assert "hub_tail" not in dumped
+
+
+def test_default_work_ids_mix_and_dedupe_titles() -> None:
+    repo = "acme/alpha"
+    project = ProjectFacts(
+        id=f"repo:{repo}",
+        repo=repo,
+        highlights=[
+            _highlight(repo, "a" * 12, "feat: 결제 API 구현"),
+            _highlight(repo, "b" * 12, "feat: 결제 API 구현"),
+            _highlight(repo, "c" * 12, "feat: 다른 커밋"),
+        ],
+        pull_requests=[
+            WorkItem(
+                id="pr:acme/alpha#1",
+                repo=repo,
+                number=1,
+                title="feat: 결제 검증",
+                source_type="pr",
+            )
+        ],
+        til=[
+            TilFact(
+                id="til:learn",
+                date=date(2026, 8, 1),
+                title="캐시 개선",
+                body_markdown="",
+                page_id="t",
+            )
+        ],
+    )
+    assert team.default_work_ids(project) == [
+        f"commit:{repo}:{'a' * 12}",
+        "pr:acme/alpha#1",
+        "til:learn",
+    ]
+    assert team.sanitize_work_ids(
+        [f"commit:{repo}:{'a' * 12}", f"commit:{repo}:{'b' * 12}", "pr:acme/alpha#1"],
+        project,
+    ) == [f"commit:{repo}:{'a' * 12}", "pr:acme/alpha#1"]
+
+
+async def test_llm_off_work_mixes_commit_pr_and_til() -> None:
+    repo = "acme/alpha"
+    alpha = _project(
+        "alpha",
+        sha="a" * 12,
+        subject="feat: 결제 API 구현",
+        commits=20,
+        highlights=[
+            _highlight(repo, "a" * 12, "feat: 결제 API 구현"),
+            _highlight(repo, "b" * 12, "feat: 두 번째 커밋"),
+            _highlight(repo, "c" * 12, "feat: 세 번째 커밋"),
+        ],
+    ).model_copy(
+        update={
+            "pull_requests": [
+                WorkItem(
+                    id="pr:acme/alpha#1",
+                    repo=repo,
+                    number=1,
+                    title="feat: 결제 검증",
+                    source_type="pr",
+                )
+            ],
+            "til": [
+                TilFact(
+                    id="til:learn",
+                    date=date(2026, 8, 1),
+                    title="캐시 개선",
+                    body_markdown="",
+                    page_id="t",
+                )
+            ],
+        }
+    )
+    proposal = await build_portfolio(llm=None, projects=[alpha, *_project_tail()[:2]])
+    work = proposal.body_markdown.split("**주요 작업**", 1)[1].split("**배운 것**", 1)[0]
+    assert "feat: 결제 API 구현" in work
+    assert "feat: 결제 검증" in work
+    assert "캐시 개선" in work
+    assert "두 번째 커밋" not in work
+    assert "세 번째 커밋" not in work

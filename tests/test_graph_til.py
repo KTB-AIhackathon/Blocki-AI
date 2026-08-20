@@ -159,6 +159,39 @@ async def test_graph_passes_notion_facts_into_built_document(monkeypatch) -> Non
 
 
 @pytest.mark.asyncio
+async def test_graph_forwards_hub_tail_to_publish(monkeypatch) -> None:
+    seen: dict = {}
+
+    async def run(_request, _snapshot, **_kwargs):
+        item = proposal("body")
+        item._publish_briefs = [{"title": "demo", "markdown": "# demo\n"}]
+        item._hub_tail = "## 그 외 학습\n- 2026-08-01 · 혼자 있는 기록\n"
+        return item
+
+    async def collect_notion(_parent_id, _token) -> NotionSnapshot:
+        return NotionSnapshot(complete=True)
+
+    async def capture(_artifact, *, notion_token, target, **kwargs):
+        seen.update(kwargs)
+        return NotionWriteResult(attempted=True, ok=True, page_id="page-1")
+
+    monkeypatch.setattr(pipelines, "run", run)
+    graph = compile_graph(
+        request(),
+        pipelines.resolve("portfolio"),
+        pat="pat",
+        notion_token="notion-token",
+        repos=[],
+        collect_fn=collect_github,
+        notion_collect_fn=collect_notion,
+        publish_fn=capture,
+    )
+    await graph.ainvoke({})
+    assert seen["briefs"][0]["title"] == "demo"
+    assert "혼자 있는 기록" in seen["hub_tail"]
+
+
+@pytest.mark.asyncio
 async def test_graph_isolates_notion_collection_failure(monkeypatch) -> None:
     async def collect_notion(_parent_id, _token) -> NotionSnapshot:
         raise RuntimeError("Notion is unavailable")

@@ -37,7 +37,9 @@ async def build(
         return common.blocked(job, KIND, missing, template_ref)
 
     sheets = briefs.render_briefs(evidence)
-    _selected, dossiers, intro = await team.run_team(evidence, llm, deadline=deadline)
+    _selected, dossiers, intro = await team.run_team(
+        evidence, llm, deadline=deadline, sheets=sheets
+    )
     view = team.view_of(evidence, _selected)
     summary_md, summary_refs = sections.summary(view, intro)
     skills_md, skills_refs = sections.skills(view)
@@ -79,6 +81,7 @@ async def build(
         warnings=list(evidence.warnings),
     )
     proposal._publish_briefs = sheets
+    proposal._hub_tail = briefs.hub_tail(evidence.unmatched_til)
     return proposal
 
 

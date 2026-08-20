@@ -118,6 +118,7 @@ class ArtifactProposal(BaseModel):
     warnings: list[str] = Field(default_factory=list)
     error: JobError | None = None
     _publish_briefs: list[dict[str, str]] = PrivateAttr(default_factory=list)
+    _hub_tail: str = PrivateAttr(default="")
 
 
 class ArtifactPayload(BaseModel):

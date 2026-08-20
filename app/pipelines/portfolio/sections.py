@@ -58,15 +58,8 @@ def projects(evidence: Evidence, dossiers: list[Dossier] | None = None) -> Secti
     return "\n\n".join(blocks), refs
 
 
-def learning(evidence: Evidence) -> Section:
-    if not evidence.unmatched_til:
-        return "", []
-    lines = ["## 📝 그 외 학습 기록", ""]
-    refs: list[EvidenceRef] = []
-    for item in evidence.unmatched_til:
-        lines.append(f"- {item.date:%Y-%m-%d} · {item.title}")
-        refs.append(common.til_ref("learning_md", item))
-    return "\n".join(lines), refs
+def learning(_evidence: Evidence) -> Section:
+    return "", []
 
 
 def _project_block(

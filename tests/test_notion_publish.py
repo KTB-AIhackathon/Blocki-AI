@@ -203,6 +203,30 @@ async def test_portfolio_publish_writes_hub_children_and_keeps_page_id_on_the_do
     assert warnings == []
 
 
+async def test_portfolio_hub_index_appends_unmatched_learning() -> None:
+    fake = FakeSession()
+    result = await notion.publish_artifact(
+        ArtifactPayload(
+            kind="portfolio",
+            title="포트폴리오",
+            body_markdown="# 홍길동\n",
+            proposal_id="p1",
+        ),
+        notion_token=NOTION_TOKEN,
+        target=fake.target(log_date=date(2026, 8, 20)),
+        session=fake,
+        briefs=[{"title": "demo", "markdown": "# demo\n"}],
+        hub_tail="## 그 외 학습\n- 2026-08-01 · 혼자 있는 기록\n",
+    )
+    hub = next(page for page in fake.logs if page["title"] == "프로젝트 2026-08-20")
+    body = fake.body_of(hub["id"]) or ""
+    assert result.ok is True
+    assert "## 그 외 학습" in body
+    assert "혼자 있는 기록" in body
+    assert "날짜:" not in body
+    assert fake.titles_under(hub["id"]) == ["demo"]
+
+
 async def test_portfolio_publish_rerun_updates_same_hub_and_child() -> None:
     fake = FakeSession()
     target = fake.target(log_date=date(2026, 8, 20))
