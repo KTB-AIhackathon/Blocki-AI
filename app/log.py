@@ -9,6 +9,7 @@ from __future__ import annotations
 import logging
 import os
 import traceback
+from datetime import datetime, timezone
 
 _FORMAT = "%(asctime)s %(levelname)s %(name)s %(message)s"
 _UNTITLED = frozenset({"", "새 페이지", "untitled", "new page", "untitled page"})
@@ -46,3 +47,7 @@ def short_id(value: str | None) -> str:
 
 def title_untitled(title: str | None) -> bool:
     return (title or "").strip().lower() in _UNTITLED
+
+
+def utc_ts() -> str:
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")

@@ -14,7 +14,7 @@ from fastapi import APIRouter
 from app.api.deps import GitHubPat, InternalKey
 from app.contracts import ErrorCode, ExecuteRequest, ExecuteResult, JobError
 from app.execute import execute_readme_pr
-from app.log import redact, redact_exc
+from app.log import redact, redact_exc, utc_ts
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -52,8 +52,8 @@ async def post_execution(
         logger.error(
             "%s",
             redact(
-                f"execution_id={req.execution_id} status={result.status} "
-                f"error={result.error.code} {result.error.message}",
+                f"uuid={req.execution_id} ts={utc_ts()} execution_id={req.execution_id} "
+                f"status={result.status} error={result.error.code} {result.error.message}",
                 pat,
             ),
         )
@@ -71,7 +71,11 @@ def _rejected(
 ) -> ExecuteResult:
     logger.error(
         "%s",
-        redact(f"execution_id={req.execution_id} status=rejected error={code} {message}", secret),
+        redact(
+            f"uuid={req.execution_id} ts={utc_ts()} execution_id={req.execution_id} "
+            f"status=rejected error={code} {message}",
+            secret,
+        ),
     )
     if exc is not None:
         logger.error("%s", redact_exc(exc, secret))

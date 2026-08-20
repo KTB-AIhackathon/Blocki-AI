@@ -337,6 +337,8 @@ async def test_collect_failure_is_logged_without_the_token(
 
     assert result.error_code == "mcp_unavailable"
     assert "job_id=log-1" in caplog.text
+    assert "uuid=log-1" in caplog.text
+    assert "ts=" in caplog.text
     assert "error=mcp_unavailable" in caplog.text
     assert PAT not in caplog.text
 
@@ -387,6 +389,8 @@ async def test_successful_job_log_has_no_token_or_title_text(
 
     assert result.ok is True
     assert "job_id=log-ok" in caplog.text
+    assert "uuid=log-ok" in caplog.text
+    assert "ts=" in caplog.text
     assert "title_untitled=False" in caplog.text
     assert PAT not in caplog.text
     assert "홍길동" not in caplog.text

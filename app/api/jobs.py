@@ -31,7 +31,7 @@ from app.contracts import (
     snapshot_summary_of,
 )
 from app.graph import compile_graph
-from app.log import redact, redact_exc, short_id, title_untitled
+from app.log import redact, redact_exc, short_id, title_untitled, utc_ts
 from app.publish import publish_artifact
 
 logger = logging.getLogger(__name__)
@@ -174,6 +174,8 @@ def _log_result(
     body = artifact.body_markdown if artifact else (proposal.body_markdown if proposal else "")
     elapsed_ms = int((time.monotonic() - started) * 1000) if started is not None else None
     parts = [
+        f"uuid={req.job_id}",
+        f"ts={utc_ts()}",
         f"job_id={req.job_id}",
         f"type={req.job_type}",
         f"ok={result.ok}",

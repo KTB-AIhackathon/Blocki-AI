@@ -19,7 +19,7 @@ from fastapi import APIRouter
 
 from app.api.deps import InternalKey, NotionToken
 from app.contracts import ErrorCode, JobError, NotionEnsureRequest, NotionEnsureResult
-from app.log import redact, redact_exc, short_id
+from app.log import redact, redact_exc, short_id, utc_ts
 from app.publish import ensure_dashboard_page
 
 logger = logging.getLogger(__name__)
@@ -53,7 +53,8 @@ async def post_dashboard(
             secret=token,
         )
     logger.info(
-        "notion dashboard ok page=%s created=%s",
+        "notion dashboard ok uuid=- ts=%s page=%s created=%s",
+        utc_ts(),
         short_id(ref.page_id),
         ref.created,
     )
@@ -70,7 +71,7 @@ def _failed(
     exc: BaseException | None = None,
     secret: str = "",
 ) -> NotionEnsureResult:
-    logger.error("%s", redact(f"notion dashboard error={code} {message}", secret))
+    logger.error("%s", redact(f"notion dashboard error={code} uuid=- ts={utc_ts()} {message}", secret))
     if exc is not None:
         logger.error("%s", redact_exc(exc, secret))
     return NotionEnsureResult(
