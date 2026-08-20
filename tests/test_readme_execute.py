@@ -2,8 +2,13 @@ from __future__ import annotations
 
 from typing import Any
 
-from app.contracts import ExecuteRequest, ReadmePrAction, action_digest_of, is_allowed_readme_path
-from app.execute.readme_pr import execute_readme_pr
+from app.contracts import (
+    ExecuteRequest,
+    ReadmePrAction,
+    action_digest_of,
+    is_allowed_readme_path,
+)
+from app.execute import execute_readme_pr
 
 PROPOSAL_ID = "11111111-2222-4333-8444-555555555555"
 EXECUTION_ID = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"

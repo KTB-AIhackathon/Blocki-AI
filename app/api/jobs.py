@@ -1,198 +1,180 @@
+"""POST /internal/jobs — the only entry point Spring uses for generation.
+
+Secrets arrive as headers, stay in closures, and never enter the graph state,
+the request body, the response, or a log line.
+"""
+
 from __future__ import annotations
 
 import asyncio
-import inspect
 import os
-import secrets
-from collections.abc import Awaitable
-from typing import Annotated, TypedDict, TypeVar
+from typing import TypedDict
 
-from fastapi import APIRouter, Depends, Header, HTTPException
+from fastapi import APIRouter
 from langgraph.graph import END, START, StateGraph
 from pydantic import model_validator
 
-from app.artifacts import build_artifact
-from app.collect.github import collect_github
+from app import pipelines
+from app.api.deps import GitHubPat, InternalKey, NotionToken
+from app.collect import collect_github
 from app.contracts import (
     ArtifactPayload,
     ArtifactProposal,
     CollectRequest,
-    GITHUB_PAT_HEADER,
     GitHubCollectError,
     GitHubSnapshot,
-    INTERNAL_KEY_HEADER,
     JobError,
     JobRequest,
     JobResult,
+    NotionWriteResult,
     RepoRef,
     SnapshotSummary,
-    fill_proposal_digests,
-    needs_for_job,
+    artifact_from,
     snapshot_summary_of,
 )
+from app.publish import publish_artifact
 
 router = APIRouter()
 
-T = TypeVar("T")
+DEFAULT_TIMEOUT = "90"
+BLOCKING_STATUSES = ("failed", "blocked")
 
 
 class JobIngressRequest(JobRequest):
     @model_validator(mode="after")
-    def require_type_payload(self) -> JobIngressRequest:
-        if self.job_type == "profile_document" and self.document is None:
-            raise ValueError("document is required for profile_document")
-        if self.job_type == "readme_proposal" and self.readme is None:
+    def _require_type_payload(self) -> JobIngressRequest:
+        pipeline = pipelines.resolve(self.job_type)
+        if pipeline is None:
+            raise ValueError(f"unsupported job_type: {self.job_type}")
+        if pipeline.requires == "document" and self.document is None:
+            raise ValueError(f"document is required for {self.job_type}")
+        if pipeline.requires == "readme" and self.readme is None:
             raise ValueError("readme is required for readme_proposal")
         return self
 
 
-class _JobState(TypedDict, total=False):
+class _State(TypedDict, total=False):
     snapshot: GitHubSnapshot
     proposal: ArtifactProposal
+    artifact: ArtifactPayload | None
+    notion: NotionWriteResult | None
 
 
-async def _maybe_await(value: T | Awaitable[T]) -> T:
-    if inspect.isawaitable(value):
-        return await value
-    return value
+@router.post("/internal/jobs", response_model=JobResult)
+async def post_job(
+    req: JobIngressRequest,
+    x_github_pat: GitHubPat = None,
+    x_notion_token: NotionToken = None,
+    _: None = InternalKey,
+) -> JobResult:
+    return await handle_job(req, x_github_pat or "", x_notion_token or "")
 
 
-def _require_internal_key(
-    x_internal_key: Annotated[str | None, Header(alias=INTERNAL_KEY_HEADER)] = None,
-) -> None:
-    expected = os.environ.get("INTERNAL_API_KEY")
-    if not expected and os.environ.get("PYTEST_CURRENT_TEST"):
-        expected = "dev-internal-key"
-    if not expected:
-        raise HTTPException(status_code=503, detail="INTERNAL_API_KEY not set")
-    if x_internal_key is None or not secrets.compare_digest(x_internal_key, expected):
-        raise HTTPException(status_code=401, detail="unauthorized")
-
-
-def _empty_summary() -> SnapshotSummary:
-    return SnapshotSummary(
-        complete=False,
-        repo_count=0,
-        commit_count=0,
-        issue_count=0,
-        pr_count=0,
-    )
-
-
-def _missing_pat_error() -> JobError:
-    return JobError(code="missing_pat", message="GitHub PAT header is required", retryable=False)
-
-
-def _artifact_from(proposal: ArtifactProposal) -> ArtifactPayload | None:
-    if not (proposal.body_markdown or "").strip():
-        return None
-    titles = {
-        "progress": "진행 메모",
-        "portfolio": "포트폴리오",
-        "resume": "이력서",
-        "readme": "README 제안",
-    }
-    return ArtifactPayload(
-        kind=proposal.kind,
-        title=titles.get(proposal.kind, proposal.kind),
-        body_markdown=proposal.body_markdown,
-        proposal_id=proposal.proposal_id,
-        template_ref=proposal.template_ref,
-    )
-
-
-async def handle_job(req: JobRequest, github_pat: str) -> JobResult:
+async def handle_job(req: JobRequest, github_pat: str, notion_token: str = "") -> JobResult:
     pat = (github_pat or "").strip()
     if not pat:
-        return JobResult(
-            job_id=req.job_id,
-            ok=False,
-            snapshot_summary=_empty_summary(),
-            next_cursor=[],
-            error=_missing_pat_error(),
+        return _failed(
+            req.job_id,
+            JobError(code="missing_pat", message="GitHub PAT header is required"),
         )
 
-    # PAT is closed over by the nodes; it must not enter graph state.
-    async def collect_node(_state: _JobState) -> dict[str, GitHubSnapshot]:
-        repos = list(req.repos)
-        if req.readme is not None:
-            target = RepoRef(owner=req.readme.owner, name=req.readme.repo)
-            if not any(r.owner == target.owner and r.name == target.name for r in repos):
-                repos = [target, *repos]
-        snapshot = await _maybe_await(
-            collect_github(
-                CollectRequest(
-                    job_id=req.job_id,
-                    repos=repos,
-                    since=req.since,
-                    cursor=req.cursor,
-                    needs=needs_for_job(req),
-                    readme_path=req.readme.path if req.readme else None,
-                ),
-                pat,
-            )
+    pipeline = pipelines.resolve(req.job_type)
+    if pipeline is None:
+        return _failed(
+            req.job_id,
+            JobError(code="validation", message=f"unsupported job_type: {req.job_type}"),
         )
-        return {"snapshot": snapshot}
 
-    async def build_node(state: _JobState) -> dict[str, ArtifactProposal]:
-        snapshot = state["snapshot"]
-        proposal = await _maybe_await(build_artifact(snapshot, req, llm=None))
-        fill_proposal_digests(proposal, snapshot.snapshot_digest)
-        return {"proposal": proposal}
-
-    graph = StateGraph(_JobState)
-    graph.add_node("collect", collect_node)
-    graph.add_node("build", build_node)
-    graph.add_edge(START, "collect")
-    graph.add_edge("collect", "build")
-    graph.add_edge("build", END)
-
+    graph = _compile(req, pipeline, pat=pat, notion_token=(notion_token or "").strip())
     try:
         out = await asyncio.wait_for(
-            graph.compile().ainvoke({}),
-            timeout=float(os.environ.get("JOB_TIMEOUT", "60")),
+            graph.ainvoke({}),
+            timeout=float(os.environ.get("JOB_TIMEOUT", DEFAULT_TIMEOUT)),
         )
     except GitHubCollectError as exc:
-        return JobResult(
-            job_id=req.job_id,
-            ok=False,
-            snapshot_summary=_empty_summary(),
-            error=exc.error,
-        )
+        return _failed(req.job_id, exc.error)
     except asyncio.TimeoutError:
-        return JobResult(
-            job_id=req.job_id,
-            ok=False,
-            snapshot_summary=_empty_summary(),
-            error=JobError(code="internal", message="job timed out", retryable=True),
+        return _failed(
+            req.job_id, JobError(code="internal", message="job timed out", retryable=True)
         )
     except Exception:
-        return JobResult(
-            job_id=req.job_id,
-            ok=False,
-            snapshot_summary=_empty_summary(),
-            error=JobError(code="internal", message="job failed", retryable=False),
-        )
+        return _failed(req.job_id, JobError(code="internal", message="job failed"))
 
-    snapshot = out["snapshot"]
-    proposal = out["proposal"]
-    ok = proposal.status not in ("failed", "blocked")
-    artifact = _artifact_from(proposal) if ok else None
+    snapshot: GitHubSnapshot = out["snapshot"]
+    proposal: ArtifactProposal = out["proposal"]
+    ok = proposal.status not in BLOCKING_STATUSES
     return JobResult(
         job_id=req.job_id,
         ok=ok,
         proposal=proposal,
-        artifact=artifact,
+        artifact=out.get("artifact") if ok else None,
+        notion=out.get("notion"),
         snapshot_summary=snapshot_summary_of(snapshot),
         next_cursor=list(snapshot.next_cursor) if snapshot.complete else [],
         error=None if ok else proposal.error,
     )
 
 
-@router.post("/internal/jobs", response_model=JobResult)
-async def post_job(
-    req: JobIngressRequest,
-    x_github_pat: Annotated[str | None, Header(alias=GITHUB_PAT_HEADER)] = None,
-    _: None = Depends(_require_internal_key),
-) -> JobResult:
-    return await handle_job(req, x_github_pat or "")
+def _compile(req: JobRequest, pipeline: pipelines.Pipeline, *, pat: str, notion_token: str):
+    async def collect(_state: _State) -> _State:
+        snapshot = await collect_github(
+            CollectRequest(
+                job_id=req.job_id,
+                repos=_repos(req),
+                since=req.since,
+                cursor=req.cursor,
+                policy=pipeline.policy,
+                readme_path=req.readme.path if req.readme else None,
+            ),
+            pat,
+        )
+        return {"snapshot": snapshot}
+
+    async def build(state: _State) -> _State:
+        proposal = await pipelines.run(req, state["snapshot"])
+        return {"proposal": proposal, "artifact": artifact_from(proposal)}
+
+    async def publish(state: _State) -> _State:
+        proposal = state["proposal"]
+        if proposal.status in BLOCKING_STATUSES:
+            return {"notion": None}
+        if not notion_token:
+            return {"notion": NotionWriteResult(skipped_reason="missing_token")}
+        result = await publish_artifact(
+            state.get("artifact"),
+            notion_token=notion_token,
+            target=req.notion,
+        )
+        return {"notion": result}
+
+    graph = StateGraph(_State)
+    graph.add_node("collect", collect)
+    graph.add_node("build", build)
+    graph.add_node("publish", publish)
+    graph.add_edge(START, "collect")
+    graph.add_edge("collect", "build")
+    graph.add_edge("build", "publish")
+    graph.add_edge("publish", END)
+    return graph.compile()
+
+
+def _repos(req: JobRequest) -> list[RepoRef]:
+    repos = list(req.repos)
+    if req.readme is None:
+        return repos
+    target = RepoRef(owner=req.readme.owner, name=req.readme.repo)
+    if any(r.owner == target.owner and r.name == target.name for r in repos):
+        return repos
+    return [target, *repos]
+
+
+def _failed(job_id: str, error: JobError) -> JobResult:
+    return JobResult(
+        job_id=job_id,
+        ok=False,
+        snapshot_summary=SnapshotSummary(
+            complete=False, repo_count=0, commit_count=0, issue_count=0, pr_count=0
+        ),
+        next_cursor=[],
+        error=error,
+    )

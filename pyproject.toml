@@ -1,7 +1,7 @@
 [project]
 name = "blocki-ai"
-version = "0.3.0"
-description = "Blocki FastAPI GitHub worker. Spring-internal only."
+version = "0.4.0"
+description = "Blocki FastAPI worker: GitHub collect/analyze, document pipelines, Notion publish."
 requires-python = ">=3.11"
 dependencies = [
   "fastapi>=0.115",
@@ -15,6 +15,10 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest>=8.3", "pytest-asyncio>=0.24"]
+# LLM providers are opt-in. app/llm/client.py detects whichever is installed,
+# so neither is required to run the deterministic pipelines.
+anthropic = ["langchain-anthropic>=0.3"]
+codex = ["algocean-codex-oauth>=0.4.2"]
 
 [build-system]
 requires = ["setuptools>=70"]
@@ -22,6 +26,9 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
 include = ["app*"]
+
+[tool.setuptools.package-data]
+"app.publish" = ["templates/*.md"]
 
 [project.scripts]
 blocki-ai = "app.__main__:main"

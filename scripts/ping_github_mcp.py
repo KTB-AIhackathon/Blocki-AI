@@ -6,8 +6,8 @@ import asyncio
 import os
 import sys
 
-from app.collect.github import collect_github
-from app.contracts import CollectRequest, GitHubCollectError
+from app.collect import collect_github
+from app.contracts import CollectPolicy, CollectRequest, GitHubCollectError
 
 
 async def main() -> int:
@@ -17,7 +17,7 @@ async def main() -> int:
         return 1
     try:
         snap = await collect_github(
-            CollectRequest(job_id="ping", needs=["activity"]),
+            CollectRequest(job_id="ping", policy=CollectPolicy(needs=["activity"], max_repos=1)),
             pat,
         )
     except GitHubCollectError as exc:
