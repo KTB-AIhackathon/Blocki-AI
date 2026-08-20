@@ -39,6 +39,14 @@ def brief_of(project: ProjectFacts, evidence: Evidence) -> str:
         meta.append(f"- 기술: {', '.join(stack)}")
     parts.extend(meta)
 
+    lead = (project.readme_lead or "").strip()
+    description = (project.description or "").strip()
+    if lead and lead != description:
+        parts.extend(["", "## 개요", "", lead])
+    if project.layout:
+        parts.extend(["", "## 구성 파일", ""])
+        parts.extend(f"- {name}" for name in project.layout)
+
     commits = [item.subject.strip() for item in project.highlights if (item.subject or "").strip()]
     if commits:
         parts.extend(["", "## 커밋", ""])

@@ -9,6 +9,7 @@ from app.contracts import (
     IssueSummary,
     LanguageShare,
     PrSummary,
+    ReadmeBlob,
     RepoActivity,
     ViewerIdentity,
 )
@@ -342,3 +343,17 @@ def test_period_spans_selected_projects() -> None:
     assert evidence.period_start == when(120)
     assert evidence.period_end == when(3)
     assert evidence.my_commits == 2
+
+
+def test_facts_copy_readme_lead_and_layout_without_rewriting() -> None:
+    repo = a_repo(
+        readme=ReadmeBlob(
+            path="README.md",
+            blob_sha="r" * 40,
+            content="# Title\n\n![badge](x)\n\nClean shareable harness.\nSecond line stays in the same paragraph.\n\n# Install\nskip",
+        )
+    )
+    facts = projects.facts_of(repo, ALICE, now=NOW)
+    assert facts.readme_lead == "Clean shareable harness. Second line stays in the same paragraph."
+    assert facts.layout == ["pyproject.toml", "Dockerfile"]
+    assert projects.readme_lead("# Only heading\n\n") is None

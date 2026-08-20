@@ -571,6 +571,21 @@ async def test_first_pass_briefs_cover_every_candidate_not_the_portfolio() -> No
     assert "_publish_briefs" not in dumped
 
 
+def test_brief_includes_readme_lead_and_layout_not_just_commits() -> None:
+    project = four_projects()[0].model_copy(
+        update={
+            "readme_lead": "패키지를 설치하고 바로 쓸 수 있게 정리한 배포본이다.",
+            "layout": ["pyproject.toml", "Dockerfile"],
+        }
+    )
+    sheet = briefs.brief_of(project, evidence_of([project]))
+    assert "## 개요" in sheet
+    assert "패키지를 설치하고 바로 쓸 수 있게 정리한 배포본이다." in sheet
+    assert "## 구성 파일" in sheet
+    assert "- pyproject.toml" in sheet
+    assert "- Dockerfile" in sheet
+
+
 def test_brief_renderer_keeps_original_work_titles() -> None:
     evidence = evidence_of(four_projects())
     sheets = briefs.render_briefs(evidence)

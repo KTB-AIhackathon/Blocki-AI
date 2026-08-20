@@ -124,6 +124,8 @@ class ProjectFacts(BaseModel):
     pull_requests: list[WorkItem] = Field(default_factory=list)
     issues: list[WorkItem] = Field(default_factory=list)
     til: list[TilFact] = Field(default_factory=list)
+    readme_lead: str | None = None
+    layout: list[str] = Field(default_factory=list)
     score: float = 0.0
     score_breakdown: dict[str, float] = Field(default_factory=dict)
     award: str | None = None

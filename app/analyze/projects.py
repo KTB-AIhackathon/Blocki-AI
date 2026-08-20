@@ -84,6 +84,8 @@ def facts_of(
             lambda issue: [issue.author, *issue.assignees],
         )),
         highlights=_highlights(repo.full_name, mine, max_highlights),
+        readme_lead=readme_lead(repo.readme.content if repo.readme else None),
+        layout=_layout(repo.manifest_files),
         pull_requests=_owned_work(
             [pr for pr in repo.pull_requests if pr.merged],
             viewer,
@@ -101,6 +103,49 @@ def facts_of(
     )
     facts.score = _score(facts, repo, now=now)
     return facts
+
+
+def readme_lead(content: str | None, *, max_chars: int = 200) -> str | None:
+    """First readable README paragraph. No rewriting."""
+    if not content:
+        return None
+    chunks: list[str] = []
+    for raw in content.splitlines():
+        line = raw.strip()
+        if (
+            not line
+            or line.startswith("#")
+            or line.startswith("<!--")
+            or line.startswith("[!")
+            or line.startswith("![")
+        ):
+            if chunks:
+                break
+            continue
+        if line.startswith(">"):
+            line = line[1:].strip()
+        if not line:
+            if chunks:
+                break
+            continue
+        chunks.append(line)
+        text = " ".join(chunks)
+        if len(text) >= max_chars:
+            return text[:max_chars].rstrip()
+    text = " ".join(chunks).strip()
+    return text[:max_chars] if text else None
+
+
+def _layout(paths: list[str], *, limit: int = 8) -> list[str]:
+    seen: list[str] = []
+    for path in paths:
+        name = (path or "").strip().rsplit("/", 1)[-1]
+        if not name or name in seen:
+            continue
+        seen.append(name)
+        if len(seen) >= limit:
+            break
+    return seen
 
 
 def _mine(commits: list[CommitSummary], viewer: ViewerIdentity) -> list[CommitSummary]:

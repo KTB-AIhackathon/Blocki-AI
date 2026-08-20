@@ -103,6 +103,9 @@ def _project_block(
         parts.append(f"- 기술 스택: {', '.join(skill.name for skill in stack)}")
     if facts.url:
         parts.append(f"- 링크: {facts.url}")
+    lead = (facts.readme_lead or "").strip()
+    if lead and lead != description:
+        parts.append(f"- {lead}")
     refs.extend(common.skill_ref("projects_md", skill.model_copy(update={"repos": [facts.repo]})) for skill in stack)
     if dossier is not None:
         for item in dossier.pitch:
