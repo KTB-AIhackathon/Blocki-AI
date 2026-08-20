@@ -127,10 +127,22 @@ async def upsert_child(
     if existing is not None:
         page_id, page_url = await session.update_page(existing["id"], markdown, title)
         return page_id, page_url or existing.get("url"), False
-    page_id, page_url = await session.create_page(
-        title=title, markdown=markdown, parent_id=parent_id
-    )
-    return page_id, page_url, True
+    try:
+        page_id, page_url = await session.create_page(
+            title=title, markdown=markdown, parent_id=parent_id
+        )
+        return page_id, page_url, True
+    except Exception as exc:
+        if not _is_conflict(exc):
+            raise
+        raced = await find_child(session, parent_id=parent_id, title=title)
+        if raced is not None:
+            page_id, page_url = await session.update_page(raced["id"], markdown, title)
+            return page_id, page_url or raced.get("url"), False
+        page_id, page_url = await session.create_page(
+            title=title, markdown=markdown, parent_id=parent_id
+        )
+        return page_id, page_url, True
 
 
 async def child_titles(session: NotionSession, parent_id: str) -> list[str]:
@@ -229,6 +241,10 @@ async def _ensure_children(session: NotionSession, parent_id: str) -> None:
                 parent_id=parent_id,
                 icon=child.icon,
             )
+
+
+def _is_conflict(error: BaseException) -> bool:
+    return "409" in str(error)
 
 
 async def _is_dashboard(session: NotionSession, page_id: str) -> bool:

@@ -259,3 +259,58 @@ async def test_dated_portfolio_logs_stack_under_the_dashboard_only() -> None:
         "포트폴리오 2026-08-20",
     ]
     assert workspace.searches == []
+
+
+class _ConflictThenPresent(NotionWorkspace):
+    def __init__(self) -> None:
+        super().__init__()
+        self.attempts = 0
+
+    async def create_page(self, *, title: str, markdown: str, parent_id: str | None, icon=None):
+        self.attempts += 1
+        if self.attempts == 1:
+            self.seed(title, parent_id=parent_id, body="old")
+            raise RuntimeError("notion api 409 /pages: conflict")
+        return await super().create_page(
+            title=title, markdown=markdown, parent_id=parent_id, icon=icon
+        )
+
+
+class _ConflictMissing(NotionWorkspace):
+    def __init__(self) -> None:
+        super().__init__()
+        self.attempts = 0
+
+    async def create_page(self, *, title: str, markdown: str, parent_id: str | None, icon=None):
+        self.attempts += 1
+        if self.attempts == 1:
+            raise RuntimeError("notion api 409 /pages: conflict")
+        return await super().create_page(
+            title=title, markdown=markdown, parent_id=parent_id, icon=icon
+        )
+
+
+async def test_upsert_child_refinds_and_updates_after_create_conflict() -> None:
+    workspace = _ConflictThenPresent()
+    parent = workspace.seed("parent")
+
+    page_id, _, created = await dash.upsert_child(
+        workspace, parent_id=parent, title="demo", markdown="# new\n"
+    )
+
+    assert created is False
+    assert workspace.attempts == 1
+    assert workspace.body_of(page_id) == "# new\n"
+
+
+async def test_upsert_child_retries_create_once_when_conflict_has_no_child() -> None:
+    workspace = _ConflictMissing()
+    parent = workspace.seed("parent")
+
+    page_id, _, created = await dash.upsert_child(
+        workspace, parent_id=parent, title="demo", markdown="# new\n"
+    )
+
+    assert created is True
+    assert workspace.attempts == 2
+    assert workspace.body_of(page_id) == "# new\n"

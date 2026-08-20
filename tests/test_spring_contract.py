@@ -85,7 +85,8 @@ def test_spring_accepts_a_generated_document(client, stub_github, kind) -> None:
     assert validate(body) in SUCCESS_STATUSES
     # 이름은 Notion 페이지 제목이 된다. 본문은 첫 섹션부터 시작한다.
     assert body["artifact"]["title"].startswith("홍길동")
-    assert body["artifact"]["body_markdown"].lstrip().startswith("##")
+    body_md = body["artifact"]["body_markdown"].lstrip()
+    assert body_md.startswith("##") or body_md.startswith(">")
     assert not any(
         line.startswith("# ") for line in body["artifact"]["body_markdown"].splitlines()
     )
@@ -119,6 +120,15 @@ def test_a_missing_pat_is_a_failure_spring_can_read(client) -> None:
     assert validate(body) == "failed"
     assert body["error_code"] == "missing_pat"
     assert body["missing_sources"] == [KNOWN_SOURCE]
+    assert body["error"]["retryable"] is False
+
+
+def test_spring_failure_response_keeps_existing_error_retryable() -> None:
+    from app.contracts import JobError
+
+    dumped = JobError(code="internal", message="job timed out", retryable=True).model_dump()
+    assert dumped["retryable"] is True
+    assert dumped["code"] == "internal"
 
 
 def test_a_document_job_that_succeeds_always_carries_an_artifact(client, stub_github) -> None:

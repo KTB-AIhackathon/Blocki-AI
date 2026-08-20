@@ -15,7 +15,6 @@ per run.
 
 from __future__ import annotations
 
-import asyncio
 from datetime import date, timedelta, timezone
 from typing import Any
 
@@ -144,40 +143,38 @@ async def _publish_portfolio(
         )
         hub_title = with_version(f"프로젝트 {when.isoformat()}", "프로젝트", siblings)
 
-        hub_res, port_res = await asyncio.gather(
-            upsert_child(live, parent_id=archive, title=hub_title, markdown="# 프로젝트\n"),
-            upsert_child(
-                live,
-                parent_id=archive,
-                title=portfolio_title,
-                markdown=artifact.body_markdown,
-            ),
-            return_exceptions=True,
+        port_res = await upsert_child(
+            live,
+            parent_id=archive,
+            title=portfolio_title,
+            markdown=artifact.body_markdown,
         )
     except OutsideDashboard as exc:
         return NotionWriteResult(attempted=False, skipped_reason=_scrub(str(exc), token))
     except Exception as exc:
         return _failed(_scrub(str(exc), token) or "notion write failed")
-    if isinstance(port_res, BaseException):
-        return _failed(_scrub(str(port_res), token) or "notion write failed")
     page_id, page_url, _ = port_res
     if not page_id:
         return _failed("notion create page returned no id")
-    if isinstance(hub_res, BaseException) or not hub_res[0]:
+    try:
+        hub_res = await upsert_child(
+            live, parent_id=archive, title=hub_title, markdown="# 프로젝트\n"
+        )
+    except Exception:
+        notes.append("프로젝트 허브를 만들지 못했습니다")
+        return NotionWriteResult(attempted=True, ok=True, page_id=page_id, page_url=page_url)
+    if not hub_res[0]:
         notes.append("프로젝트 허브를 만들지 못했습니다")
         return NotionWriteResult(attempted=True, ok=True, page_id=page_id, page_url=page_url)
     hub_id, _, _ = hub_res
 
-    children = await asyncio.gather(
-        *(_upsert_brief(live, hub_id, brief) for brief in briefs),
-        return_exceptions=True,
-    )
     mentions: list[str] = []
-    for brief, item in zip(briefs, children):
-        if isinstance(item, BaseException):
+    for brief in briefs:
+        try:
+            child_id, child_url = await _upsert_brief(live, hub_id, brief)
+        except Exception:
             notes.append(f"{brief['title']} 페이지를 쓰지 못했습니다")
             continue
-        child_id, child_url = item
         if not child_id:
             notes.append(f"{brief['title']} 페이지를 쓰지 못했습니다")
             continue

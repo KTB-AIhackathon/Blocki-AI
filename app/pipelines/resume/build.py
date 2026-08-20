@@ -67,7 +67,7 @@ async def build(
         version,
         {
             "name": fields.name,
-            "contact_md": fields.contact_md,
+            "contact_md": fields.contact_md.strip() or common.FILL_IN,
             "summary_md": summary_md,
             "skills_md": skills_md,
             "projects_md": projects_md,

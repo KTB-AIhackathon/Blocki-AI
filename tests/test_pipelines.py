@@ -104,7 +104,7 @@ async def test_resume_without_a_career_leaves_a_blank_to_fill_in() -> None:
     assert proposal.error is None
     assert "## 경력" in proposal.body_markdown
     assert "## 학력" in proposal.body_markdown
-    assert proposal.body_markdown.count(common.FILL_IN) == 3
+    assert proposal.body_markdown.count(common.FILL_IN) == 4
 
 
 async def test_a_supplied_career_replaces_the_blank() -> None:
@@ -117,7 +117,7 @@ async def test_a_supplied_career_replaces_the_blank() -> None:
     proposal = await pipelines.run(job, snapshot)
 
     assert "- 2025 ~ : 백엔드" in proposal.body_markdown
-    assert proposal.body_markdown.count(common.FILL_IN) == 2
+    assert proposal.body_markdown.count(common.FILL_IN) == 3
     assert "education_md" in proposal.unresolved_fields
     assert "experience_md" not in proposal.unresolved_fields
 
@@ -132,6 +132,18 @@ async def test_a_document_without_a_name_is_still_blocked() -> None:
     assert proposal.unresolved_fields == ["name"]
     assert proposal.error is not None and proposal.error.code == "blocked"
     assert proposal.body_markdown == ""
+
+
+async def test_blank_contact_renders_fill_in_and_remains_partial() -> None:
+    fake = FakeGitHub()
+    snapshot = await snapshot_for("portfolio", fake)
+    proposal = await pipelines.run(
+        document_job("portfolio", ProfileFields(name="홍길동")), snapshot
+    )
+
+    assert proposal.status == "partial"
+    assert "contact_md" in proposal.unresolved_fields
+    assert common.FILL_IN in proposal.body_markdown
 
 
 async def test_portfolio_does_not_require_experience() -> None:

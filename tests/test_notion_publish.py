@@ -280,10 +280,10 @@ async def test_portfolio_publish_rerun_stacks_a_new_version_with_its_own_hub() -
     assert first.page_id != second.page_id
     # 판마다 문서와 허브가 짝을 이룬다. 이전 판의 정리도 그대로 남는다.
     assert fake.titles_under(fake.archive_id) == [
-        "프로젝트 v1 2026-08-20",
         "포트폴리오 v1 2026-08-20",
-        "프로젝트 v2 2026-08-20",
+        "프로젝트 v1 2026-08-20",
         "포트폴리오 v2 2026-08-20",
+        "프로젝트 v2 2026-08-20",
     ]
     bodies = []
     for version in ("v1", "v2"):
@@ -292,6 +292,84 @@ async def test_portfolio_publish_rerun_stacks_a_new_version_with_its_own_hub() -
         child = next(page for page in fake.pages if page["parent_id"] == hub["id"])
         bodies.append(fake.body_of(child["id"]))
     assert bodies == ["# 첫 정리\n", "# 둘째 정리\n"]
+
+
+async def test_portfolio_publishes_main_then_hub_then_briefs_serially() -> None:
+    fake = FakeSession()
+    await notion.publish_artifact(
+        ArtifactPayload(
+            kind="portfolio",
+            title="포트폴리오",
+            body_markdown="# 홍길동\n",
+            proposal_id="p1",
+        ),
+        notion_token=NOTION_TOKEN,
+        target=fake.target(log_date=date(2026, 8, 20)),
+        session=fake,
+        briefs=[{"title": "demo", "markdown": "# demo\n"}],
+    )
+    created = [item["title"] for item in fake.creates]
+    folio = created.index("포트폴리오 v1 2026-08-20")
+    hub = created.index("프로젝트 v1 2026-08-20")
+    brief = created.index("demo")
+    assert folio < hub < brief
+
+
+async def test_secondary_page_failures_keep_main_notion_ok_and_name_the_page() -> None:
+    warnings: list[str] = []
+
+    class FailHub(FakeSession):
+        async def create_page(self, *, title: str, markdown: str, parent_id: str | None, icon=None):
+            if title.startswith("프로젝트"):
+                raise RuntimeError("hub write failed")
+            return await NotionWorkspace.create_page(
+                self, title=title, markdown=markdown, parent_id=parent_id, icon=icon
+            )
+
+    fake = FailHub()
+    result = await notion.publish_artifact(
+        ArtifactPayload(
+            kind="portfolio",
+            title="포트폴리오",
+            body_markdown="# 홍길동\n",
+            proposal_id="p1",
+        ),
+        notion_token=NOTION_TOKEN,
+        target=fake.target(log_date=date(2026, 8, 20)),
+        session=fake,
+        briefs=[{"title": "demo", "markdown": "# demo\n"}],
+        publish_warnings=warnings,
+    )
+    folio = next(page for page in fake.logs if page["title"] == "포트폴리오 v1 2026-08-20")
+    assert result.ok is True
+    assert result.page_id == folio["id"]
+    assert any("허브" in note for note in warnings)
+
+
+async def test_main_portfolio_failure_keeps_notion_failed() -> None:
+    class FailMain(FakeSession):
+        async def create_page(self, *, title: str, markdown: str, parent_id: str | None, icon=None):
+            if title.startswith("포트폴리오"):
+                raise RuntimeError("main write failed")
+            return await NotionWorkspace.create_page(
+                self, title=title, markdown=markdown, parent_id=parent_id, icon=icon
+            )
+
+    fake = FailMain()
+    result = await notion.publish_artifact(
+        ArtifactPayload(
+            kind="portfolio",
+            title="포트폴리오",
+            body_markdown="# 홍길동\n",
+            proposal_id="p1",
+        ),
+        notion_token=NOTION_TOKEN,
+        target=fake.target(log_date=date(2026, 8, 20)),
+        session=fake,
+        briefs=[{"title": "demo", "markdown": "# demo\n"}],
+    )
+    assert result.ok is False
+    assert result.error is not None
 
 
 async def test_read_page_uses_the_advertised_argument_name() -> None:
