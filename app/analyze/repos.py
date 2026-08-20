@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import math
-import os
 import re
 from datetime import datetime
 
 from app.contracts import ProjectFacts, RepoActivity, as_utc
+from app.contracts.repo_filter import excluded_repos, is_blocked_repo, listed_eligible
+
+__all__ = ["award_of", "eligible", "excluded_repos", "listed_eligible", "select"]
 
 _RECENT_DAYS = 90
 _YEAR_DAYS = 365
@@ -15,25 +17,9 @@ _AWARD = re.compile(r"수상|우수상|대상|최우수|입상|1위|2위|award|w
 _NON_PROJECT_PARTS = {"study", "til", "practice", "tutorial", "notes", "log"}
 
 
-def excluded_repos() -> set[str]:
-    """`owner/name` the operator never wants in a document, comma separated.
-
-    Some repositories are dead, private-by-intent or simply not the person's
-    work, and no signal in the data says so. Unset means exclude nothing.
-    """
-    raw = os.environ.get("BLOCKI_EXCLUDE_REPOS", "")
-    return {part.strip().casefold() for part in raw.split(",") if part.strip()}
-
-
 def eligible(repo: RepoActivity) -> bool:
-    """Forks and archived repositories are not evidence of authored work."""
-    if repo.full_name.casefold() in excluded_repos():
-        return False
-    # `owner/owner` 는 깃허브 프로필 상단에 띄우는 README 저장소다. 커밋이 아무리
-    # 많아도 프로젝트가 아니라 자기소개라, 감점이 아니라 후보에서 빼야 한다.
-    if repo.name.casefold() == repo.owner.casefold():
-        return False
-    return not repo.fork and not repo.archived
+    """Forks, archives, profile READMEs, and the exclude list are not projects."""
+    return not is_blocked_repo(repo.owner, repo.name, fork=repo.fork, archived=repo.archived)
 
 
 def _score(facts: ProjectFacts, repo: RepoActivity, *, now: datetime) -> float:
@@ -94,7 +80,7 @@ def award_of(repo: RepoActivity) -> str | None:
 
 def select(
     facts: list[ProjectFacts], *, limit: int, require_own_commits: bool
-) -> tuple[list[ProjectFacts], list[str]]:
+) -> tuple[list[ProjectFacts], list[ProjectFacts], list[str]]:
     warnings: list[str] = []
     candidates = list(facts)
 
@@ -107,4 +93,4 @@ def select(
     candidates.sort(key=lambda f: (-f.score, f.repo))
     if len(candidates) > limit:
         warnings.append(f"상위 {limit}개만 사용 (후보 {len(candidates)}개)")
-    return candidates[:limit], warnings
+    return candidates[:limit], candidates, warnings

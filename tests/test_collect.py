@@ -44,6 +44,121 @@ DOCUMENT = CollectPolicy(
 )
 
 
+async def test_list_repos_skips_profile_fork_archived_and_excluded(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("BLOCKI_EXCLUDE_REPOS", "acme/secret")
+    fake = FakeGitHub(
+        list_repos=[
+            {"full_name": "acme/acme"},
+            {"full_name": "acme/forked", "fork": True},
+            {"full_name": "acme/old", "archived": True},
+            {"full_name": "acme/secret"},
+            {"full_name": "acme/one"},
+            {"full_name": "acme/two"},
+            {"full_name": "acme/three"},
+        ]
+    )
+    snap = await collect_github(
+        request_for(CollectPolicy(needs=["activity"], max_repos=6), repos=[]),
+        PAT,
+        call_tool=fake,
+    )
+
+    assert [repo.full_name for repo in snap.repos] == ["acme/one", "acme/two", "acme/three"]
+    assert fake.args_for("list_repos")[0]["limit"] >= 40
+
+
+async def test_profile_readme_is_collected_outside_project_slots() -> None:
+    from app.analyze import analyze
+
+    fake = FakeGitHub(
+        list_repos=[
+            {"full_name": "alice/alice"},
+            {"full_name": "alice/one"},
+            {"full_name": "alice/two"},
+        ]
+    )
+    snap = await collect_github(
+        request_for(
+            CollectPolicy(needs=["activity", "profile_evidence"], max_repos=2),
+            repos=[],
+        ),
+        PAT,
+        call_tool=fake,
+    )
+    names = [repo.full_name for repo in snap.repos]
+    assert names[:2] == ["alice/one", "alice/two"]
+    assert "alice/alice" in names
+    profile = next(repo for repo in snap.repos if repo.full_name == "alice/alice")
+    assert profile.readme is not None
+
+    evidence = analyze(snap)
+    assert "alice/alice" not in [project.repo for project in evidence.projects]
+    assert "alice/alice" not in [project.repo for project in evidence.selection_candidates]
+
+
+async def test_explicit_blocked_repos_do_not_take_project_slots(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("BLOCKI_EXCLUDE_REPOS", "acme/secret")
+    snap = await collect_github(
+        request_for(
+            CollectPolicy(needs=["activity", "profile_evidence"], max_repos=2),
+            repos=[
+                RepoRef(owner="alice", name="alice"),
+                RepoRef(owner="acme", name="secret"),
+                RepoRef(owner="acme", name="one"),
+                RepoRef(owner="acme", name="two"),
+            ],
+        ),
+        PAT,
+        call_tool=FakeGitHub(),
+    )
+    names = [repo.full_name for repo in snap.repos]
+    assert names[:2] == ["acme/one", "acme/two"]
+    assert "alice/alice" in names
+    assert "acme/secret" not in names
+
+
+async def test_explicit_forks_and_archives_do_not_consume_project_slots() -> None:
+    def meta(args):
+        if args["name"] == "forked":
+            return repo_meta(fork=True)
+        if args["name"] == "old":
+            return repo_meta(archived=True)
+        return repo_meta()
+
+    snap = await collect_github(
+        request_for(
+            CollectPolicy(needs=["activity"], max_repos=2),
+            repos=[
+                RepoRef(owner="acme", name="forked"),
+                RepoRef(owner="acme", name="old"),
+                RepoRef(owner="acme", name="one"),
+                RepoRef(owner="acme", name="two"),
+            ],
+        ),
+        PAT,
+        call_tool=FakeGitHub(get_repo_meta=meta),
+    )
+
+    assert [repo.full_name for repo in snap.repos] == ["acme/one", "acme/two"]
+
+
+async def test_missing_profile_readme_does_not_mark_the_snapshot_incomplete() -> None:
+    def meta(args):
+        if args["owner"] == "alice" and args["name"] == "alice":
+            raise RuntimeError("404 Not Found")
+        return repo_meta()
+
+    snap = await collect_github(request_for(DOCUMENT), PAT, call_tool=FakeGitHub(get_repo_meta=meta))
+
+    assert [repo.full_name for repo in snap.repos] == ["acme/demo"]
+    assert snap.complete is True
+    assert not any("alice" in warning for warning in snap.warnings)
+
+
 async def test_collects_viewer_and_repo_activity(fake_github: FakeGitHub) -> None:
     snap = await collect_github(request_for(ACTIVITY), PAT, call_tool=fake_github)
 

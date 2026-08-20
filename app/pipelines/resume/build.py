@@ -153,7 +153,13 @@ def _profile_readme(snapshot: GitHubSnapshot) -> dict[str, str]:
     if not login:
         return {}
     profile = next(
-        (repo.readme.content for repo in snapshot.repos if repo.name.casefold() == login and repo.readme),
+        (
+            repo.readme.content
+            for repo in snapshot.repos
+            if repo.owner.casefold() == login
+            and repo.name.casefold() == login
+            and repo.readme
+        ),
         "",
     )
     if not profile:

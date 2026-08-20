@@ -110,7 +110,8 @@ def test_successful_job_returns_artifact_for_spring(
     assert "홍길동" in body["artifact"]["title"]
     assert "홍길동" not in body["artifact"]["body_markdown"]
     assert body["next_cursor"][0]["head_sha"]
-    assert body["snapshot_summary"]["repo_count"] == 1
+    assert body["snapshot_summary"]["repo_count"] == 2
+    assert "alice/alice" not in body["artifact"]["body_markdown"]
     assert PAT not in response.text
 
 
