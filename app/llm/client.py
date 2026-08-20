@@ -1,13 +1,11 @@
 """The only module that knows which LLM vendor we are on.
 
 Everything downstream sees a LangChain `BaseChatModel` and uses
-`ainvoke` / `with_structured_output`. Swapping the local Codex wrapper for the
-production Claude key is a change to `_build` and nothing else.
+`ainvoke` / `with_structured_output`. Local and deploy both use Anthropic.
 
 Environment:
-  BLOCKI_LLM_PROVIDER   auto (default) | anthropic | codex | none
+  BLOCKI_LLM_PROVIDER   auto (default) | anthropic | none
   BLOCKI_LLM_MODEL      provider-specific model id
-  BLOCKI_LLM_EFFORT     reasoning effort, when the provider supports it
   ANTHROPIC_API_KEY     required by the anthropic provider
 """
 
@@ -20,10 +18,7 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
-# Deploy: Anthropic API key + Sonnet. Local: host Codex/GPT (UI name "luna").
 ANTHROPIC_DEFAULT_MODEL = "claude-sonnet-4-5"
-CODEX_DEFAULT_MODEL = "gpt-5.6"
-CODEX_DEFAULT_EFFORT = "xhigh"
 
 
 def provider() -> str:
@@ -32,8 +27,6 @@ def provider() -> str:
         return configured
     if os.environ.get("ANTHROPIC_API_KEY") and _importable("langchain_anthropic"):
         return "anthropic"
-    if _importable("algocean_codex_oauth"):
-        return "codex"
     return "none"
 
 
@@ -67,15 +60,6 @@ def _build(name: str) -> Any:
             temperature=0,
             timeout=float(os.environ.get("LLM_TIMEOUT", "60")),
             max_retries=1,
-        )
-
-    if name == "codex":
-        from algocean_codex_oauth import AlgoceanCodexOAuth
-
-        return AlgoceanCodexOAuth.chat(
-            model=os.environ.get("BLOCKI_LLM_MODEL", CODEX_DEFAULT_MODEL),
-            reasoning_effort=os.environ.get("BLOCKI_LLM_EFFORT", CODEX_DEFAULT_EFFORT),
-            timeout=int(float(os.environ.get("LLM_TIMEOUT", "180"))),
         )
 
     raise ValueError(f"unknown llm provider: {name}")

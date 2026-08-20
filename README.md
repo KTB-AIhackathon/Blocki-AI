@@ -34,10 +34,9 @@ app/
 | `INTERNAL_API_KEY` | 예 | Spring과 공유하는 내부 키. 없으면 `/internal/*` 는 503 |
 | `GITHUB_MCP_URL` | 아니오 | 기본 `https://api.githubcopilot.com/mcp/` |
 | `NOTION_MCP_URL` | 아니오 | 기본 `https://mcp.notion.com/mcp` |
-| `BLOCKI_LLM_PROVIDER` | 아니오 | `auto`(기본) · `anthropic` · `codex` · `none` |
-| `BLOCKI_LLM_MODEL` | 아니오 | 로컬 기본 `gpt-5.6`, 배포 기본 `claude-sonnet-4-5` |
-| `BLOCKI_LLM_EFFORT` | 아니오 | Codex 추론. 로컬 기본 `xhigh` |
-| `ANTHROPIC_API_KEY` | 아니오 | 있으면 `auto`가 Claude를 고른다 |
+| `BLOCKI_LLM_PROVIDER` | 아니오 | `auto`(기본) · `anthropic` · `none` |
+| `BLOCKI_LLM_MODEL` | 아니오 | 기본 `claude-sonnet-4-5` |
+| `ANTHROPIC_API_KEY` | 배포에서 예 | Claude. 있으면 `auto`가 Anthropic을 고른다 |
 | `JOB_TIMEOUT` | 아니오 | 초. 기본 `90` |
 | `PORT` | 아니오 | 기본 `8000` |
 
@@ -77,10 +76,6 @@ python3 e2e/run_stack.py
 provider를 아는 파일은 `app/llm/client.py` 하나다.
 
 ```bash
-# 로컬: Codex OAuth 구독으로 테스트
-uv sync --extra codex && codex login
-
-# 운영: Claude Sonnet
 uv sync --extra anthropic
 export ANTHROPIC_API_KEY=sk-ant-...
 ```

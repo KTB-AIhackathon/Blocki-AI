@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import inspect
+import logging
 import os
 from collections.abc import Awaitable
 from typing import TypeVar
@@ -13,7 +14,9 @@ from fastapi import APIRouter
 from app.api.deps import GitHubPat, InternalKey
 from app.contracts import ErrorCode, ExecuteRequest, ExecuteResult, JobError
 from app.execute import execute_readme_pr
+from app.log import redact
 
+logger = logging.getLogger(__name__)
 router = APIRouter()
 
 DEFAULT_TIMEOUT = "60"
@@ -35,23 +38,44 @@ async def post_execution(
 ) -> ExecuteResult:
     pat = (x_github_pat or "").strip()
     if not pat:
-        return _rejected(req.execution_id, "missing_pat", "GitHub PAT header is required", False)
+        return _rejected(req, "missing_pat", "GitHub PAT header is required", False)
     try:
-        return await asyncio.wait_for(
+        result = await asyncio.wait_for(
             _maybe_await(execute_readme_pr(req, pat)),
             timeout=float(os.environ.get("EXECUTION_TIMEOUT", DEFAULT_TIMEOUT)),
         )
-    except asyncio.TimeoutError:
-        return _rejected(req.execution_id, "internal", "execution timed out", True)
-    except Exception:
-        return _rejected(req.execution_id, "internal", "execution failed", False)
+    except asyncio.TimeoutError as exc:
+        return _rejected(req, "internal", "execution timed out", True, exc=exc, secret=pat)
+    except Exception as exc:
+        return _rejected(req, "internal", "execution failed", False, exc=exc, secret=pat)
+    if result.error:
+        logger.error(
+            "%s",
+            redact(
+                f"execution_id={req.execution_id} status={result.status} "
+                f"error={result.error.code} {result.error.message}",
+                pat,
+            ),
+        )
+    return result
 
 
 def _rejected(
-    execution_id: str, code: ErrorCode, message: str, retryable: bool
+    req: ExecuteRequest,
+    code: ErrorCode,
+    message: str,
+    retryable: bool,
+    *,
+    exc: BaseException | None = None,
+    secret: str = "",
 ) -> ExecuteResult:
+    logger.error(
+        "%s",
+        redact(f"execution_id={req.execution_id} status=rejected error={code} {message}", secret),
+        exc_info=exc,
+    )
     return ExecuteResult(
-        execution_id=execution_id,
+        execution_id=req.execution_id,
         status="rejected",
         error=JobError(code=code, message=message, retryable=retryable),
     )

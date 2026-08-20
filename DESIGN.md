@@ -200,13 +200,11 @@ graph LR
 
 | env | 값 |
 | --- | --- |
-| `BLOCKI_LLM_PROVIDER` | `auto`(기본) / `anthropic` / `codex` / `none` |
-| `BLOCKI_LLM_MODEL` | provider별 모델 id |
+| `BLOCKI_LLM_PROVIDER` | `auto`(기본) / `anthropic` / `none` |
+| `BLOCKI_LLM_MODEL` | 기본 `claude-sonnet-4-5` |
 | `ANTHROPIC_API_KEY` | 있으면 auto가 anthropic 선택 |
 
-`auto`는 `ANTHROPIC_API_KEY` + `langchain-anthropic`이 있으면 Claude, 없고
-`algocean-codex-oauth`가 깔려 있으면 로컬 Codex, 둘 다 없으면 `none`.
-운영에서 Claude Sonnet으로 바꾸는 작업은 키를 넣는 것뿐이고 코드 변경이 없다.
+`auto`는 `ANTHROPIC_API_KEY` + `langchain-anthropic`이 있으면 Claude, 없으면 `none`.
 
 `guard.py`는 두 가지를 보장한다.
 

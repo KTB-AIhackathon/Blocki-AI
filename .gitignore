@@ -1,5 +1,8 @@
 Local_Docs/
 .env
+.env.*
+!.env.example
+env
 .venv/
 __pycache__/
 *.pyc

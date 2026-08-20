@@ -9,9 +9,8 @@ COPY pyproject.toml ./
 COPY app ./app
 COPY templates ./templates
 
-# Both extras stay in the image so local Codex and prod Anthropic are a
-# provider env flip, not a rebuild. Pipelines still run if neither key is set.
-RUN pip install --no-cache-dir -e ".[anthropic,codex]"
+# Anthropic only. Pipelines still run if the key is missing.
+RUN pip install --no-cache-dir -e ".[anthropic]"
 
 EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=5s --retries=3 \

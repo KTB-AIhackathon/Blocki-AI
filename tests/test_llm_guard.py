@@ -117,6 +117,17 @@ def test_provider_selection_is_config_driven(monkeypatch: pytest.MonkeyPatch) ->
     assert client.get_llm() is None
 
 
+def test_removed_providers_do_not_build(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.setenv("BLOCKI_LLM_PROVIDER", "codex")
+    client.reset()
+    assert client.get_llm() is None
+
+    monkeypatch.setenv("BLOCKI_LLM_PROVIDER", "auto")
+    client.reset()
+    assert client.provider() == "none"
+
+
 def test_evidence_digest_carries_facts_not_raw_text() -> None:
     from datetime import datetime, timezone
 

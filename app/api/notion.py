@@ -12,14 +12,17 @@ writing to the former is what put pages in the wrong place before.
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 
 from fastapi import APIRouter
 
 from app.api.deps import InternalKey, NotionToken
 from app.contracts import ErrorCode, JobError, NotionEnsureRequest, NotionEnsureResult
+from app.log import redact
 from app.publish import ensure_dashboard_page
 
+logger = logging.getLogger(__name__)
 router = APIRouter()
 
 DEFAULT_TIMEOUT = "60"
@@ -39,16 +42,35 @@ async def post_dashboard(
             ensure_dashboard_page(notion_token=token, known_page_id=req.known_page_id),
             timeout=float(os.environ.get("NOTION_ENSURE_TIMEOUT", DEFAULT_TIMEOUT)),
         )
-    except asyncio.TimeoutError:
-        return _failed("internal", "notion ensure timed out", True)
+    except asyncio.TimeoutError as exc:
+        return _failed("internal", "notion ensure timed out", True, exc=exc, secret=token)
     except Exception as exc:
-        return _failed("internal", _scrub(_exception_message(exc), token), True)
+        return _failed(
+            "internal",
+            redact(_exception_message(exc), token) or "notion ensure failed",
+            True,
+            exc=exc,
+            secret=token,
+        )
+    logger.info(
+        "notion dashboard ok page_id=%s created=%s",
+        ref.page_id,
+        ref.created,
+    )
     return NotionEnsureResult(
         ok=True, page_id=ref.page_id, page_url=ref.page_url, created=ref.created
     )
 
 
-def _failed(code: ErrorCode, message: str, retryable: bool) -> NotionEnsureResult:
+def _failed(
+    code: ErrorCode,
+    message: str,
+    retryable: bool,
+    *,
+    exc: BaseException | None = None,
+    secret: str = "",
+) -> NotionEnsureResult:
+    logger.error("%s", redact(f"notion dashboard error={code} {message}", secret), exc_info=exc)
     return NotionEnsureResult(
         ok=False, error=JobError(code=code, message=message, retryable=retryable)
     )
@@ -69,7 +91,3 @@ def _exception_message(exc: BaseException) -> str:
 
     walk(exc)
     return "; ".join(parts) or type(exc).__name__
-
-
-def _scrub(text: str, token: str) -> str:
-    return ((text.replace(token, "«token»") if token else text)[:300]) or "notion ensure failed"
